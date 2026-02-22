@@ -1,0 +1,46 @@
+CREATE TABLE IF NOT EXISTS users (
+  id BIGSERIAL PRIMARY KEY,
+  username VARCHAR(120) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(30) NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS vicidial_settings (
+  id BIGINT PRIMARY KEY,
+  base_url VARCHAR(255) NOT NULL,
+  api_user VARCHAR(120) NOT NULL,
+  api_pass_encrypted TEXT NOT NULL,
+  source VARCHAR(120) NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS customers (
+  id BIGSERIAL PRIMARY KEY,
+  dni VARCHAR(80) UNIQUE NOT NULL,
+  first_name VARCHAR(120),
+  last_name VARCHAR(120),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS customer_phones (
+  id BIGSERIAL PRIMARY KEY,
+  customer_id BIGINT NOT NULL REFERENCES customers(id),
+  phone_number VARCHAR(60) NOT NULL,
+  is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS interactions (
+  id BIGSERIAL PRIMARY KEY,
+  customer_id BIGINT,
+  dni VARCHAR(80),
+  phone_number VARCHAR(60) NOT NULL,
+  lead_id BIGINT,
+  campaign VARCHAR(100),
+  agent_user VARCHAR(120) NOT NULL,
+  mode VARCHAR(30) NOT NULL,
+  dispo VARCHAR(60) NOT NULL,
+  notes TEXT,
+  extra_json TEXT,
+  sync_status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
