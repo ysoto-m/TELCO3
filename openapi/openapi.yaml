@@ -1,0 +1,278 @@
+openapi: 3.0.3
+info:
+  title: VICIdial Agent UI API
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      properties:
+        accessToken: { type: string }
+        role: { type: string, enum: [AGENT, REPORT_ADMIN] }
+        username: { type: string }
+    VicidialSettingsRequest:
+      type: object
+      required: [baseUrl, apiUser, apiPass, source]
+      properties:
+        baseUrl: { type: string }
+        apiUser: { type: string }
+        apiPass: { type: string }
+        source: { type: string }
+    VicidialSettingsResponse:
+      type: object
+      properties:
+        baseUrl: { type: string }
+        apiUser: { type: string }
+        source: { type: string }
+        updatedAt: { type: string, format: date-time }
+    ActiveLeadResponse:
+      type: object
+      properties:
+        leadId: { type: integer, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        campaign: { type: string, nullable: true }
+    AgentContextResponse:
+      type: object
+      properties:
+        lead:
+          type: object
+          properties:
+            leadId: { type: integer }
+            phoneNumber: { type: string }
+            campaign: { type: string }
+            dni: { type: string }
+        customer:
+          type: object
+          properties:
+            dni: { type: string }
+            firstName: { type: string }
+            lastName: { type: string }
+        phones:
+          type: array
+          items:
+            type: object
+            properties:
+              phoneNumber: { type: string }
+              isPrimary: { type: boolean }
+        interactions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              dispo: { type: string }
+              notes: { type: string }
+              createdAt: { type: string, format: date-time }
+              syncStatus: { type: string, enum: [PENDING, SYNCED, FAILED] }
+        dispoOptions:
+          type: array
+          items: { type: string }
+    InteractionRequest:
+      type: object
+      required: [agentUser, mode, leadId, phoneNumber, campaign, dni, dispo]
+      properties:
+        agentUser: { type: string }
+        mode: { type: string, enum: [predictive, preview] }
+        leadId: { type: integer }
+        phoneNumber: { type: string }
+        campaign: { type: string }
+        dni: { type: string }
+        dispo: { type: string }
+        notes: { type: string }
+        extra: { type: object, additionalProperties: true }
+    InteractionResponse:
+      type: object
+      properties:
+        id: { type: integer }
+        syncStatus: { type: string, enum: [PENDING, SYNCED, FAILED] }
+        message: { type: string }
+    PreviewActionRequest:
+      type: object
+      required: [agentUser, leadId, campaign, action]
+      properties:
+        agentUser: { type: string }
+        leadId: { type: integer }
+        campaign: { type: string }
+        action: { type: string, enum: [DIALONLY, SKIP, FINISH] }
+    PauseRequest:
+      type: object
+      required: [agentUser, action]
+      properties:
+        agentUser: { type: string }
+        action: { type: string, enum: [PAUSE, RESUME] }
+    OkResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+    ImportResponse:
+      type: object
+      properties:
+        imported: { type: integer }
+        failed: { type: integer }
+        errors:
+          type: array
+          items: { type: string }
+paths:
+  /api/auth/login:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+  /api/settings/vicidial:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VicidialSettingsResponse' }
+    put:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VicidialSettingsRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/active-lead:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: agentUser
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActiveLeadResponse' }
+  /api/agent/context:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: agentUser, in: query, required: true, schema: { type: string } }
+        - { name: leadId, in: query, required: false, schema: { type: integer } }
+        - { name: phone, in: query, required: false, schema: { type: string } }
+        - { name: campaign, in: query, required: false, schema: { type: string } }
+        - { name: mode, in: query, required: true, schema: { type: string, enum: [predictive, preview] } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentContextResponse' }
+  /api/agent/interactions:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InteractionRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InteractionResponse' }
+  /api/agent/interactions/{id}/retry-vicidial:
+    post:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InteractionResponse' }
+  /api/agent/preview-action:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PreviewActionRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/pause:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PauseRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/vicidial/leads/import:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportResponse' }
+  /api/reports/summary:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: campaign, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/reports/export:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: format, in: query, required: true, schema: { type: string, enum: [csv] } }
+      responses:
+        '200':
+          description: csv

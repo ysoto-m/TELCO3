@@ -1,0 +1,12 @@
+import api from './client';
+export const login = (payload:{username:string,password:string})=>api.post('/api/auth/login',payload).then(r=>r.data);
+export const getSettings = ()=>api.get('/api/settings/vicidial').then(r=>r.data);
+export const putSettings = (payload:any)=>api.put('/api/settings/vicidial',payload).then(r=>r.data);
+export const getActiveLead = (agentUser:string)=>api.get('/api/agent/active-lead',{params:{agentUser}}).then(r=>r.data);
+export const getContext = (p:any)=>api.get('/api/agent/context',{params:p}).then(r=>r.data);
+export const saveInteraction = (payload:any)=>api.post('/api/agent/interactions',payload).then(r=>r.data);
+export const retryInteraction = (id:number)=>api.post(`/api/agent/interactions/${id}/retry-vicidial`).then(r=>r.data);
+export const previewAction = (payload:any)=>api.post('/api/agent/preview-action',payload).then(r=>r.data);
+export const pauseAction = (payload:any)=>api.post('/api/agent/pause',payload).then(r=>r.data);
+export const importCsv = (file:File)=>{const f=new FormData();f.append('file',file);return api.post('/api/vicidial/leads/import',f).then(r=>r.data)};
+export const reportSummary=(p:any)=>api.get('/api/reports/summary',{params:p}).then(r=>r.data);
