@@ -2,33 +2,50 @@ package com.telco3.agentui.agent;
 
 import com.telco3.agentui.domain.AgentVicidialCredentialRepository;
 import com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity;
+import com.telco3.agentui.domain.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Optional;
 
 @Service
 public class VicidialCredentialService {
-  private final AgentVicidialCredentialRepository repo;
-  private final SecretKeySpec key;
+  private static final Logger log = LoggerFactory.getLogger(VicidialCredentialService.class);
 
-  public VicidialCredentialService(AgentVicidialCredentialRepository repo, @Value("${app.crypto-key}") String cryptoKey) {
+  private final AgentVicidialCredentialRepository repo;
+  private final UserRepository userRepository;
+  private final SecretKeySpec key;
+  private final Environment environment;
+
+  public VicidialCredentialService(
+      AgentVicidialCredentialRepository repo,
+      UserRepository userRepository,
+      @Value("${app.crypto-key}") String cryptoKey,
+      Environment environment
+  ) {
     this.repo = repo;
+    this.userRepository = userRepository;
     this.key = new SecretKeySpec(cryptoKey.getBytes(StandardCharsets.UTF_8), "AES");
+    this.environment = environment;
   }
 
   public AgentProfileState getProfile(String appUsername) {
     var entity = repo.findByAppUsername(appUsername).orElse(null);
+    boolean hasAgentPass = resolveAgentPass(appUsername).isPresent();
     if (entity == null) {
-      return new AgentProfileState(false, null, null, true, false, null, null, null, appUsername);
+      return new AgentProfileState(hasAgentPass, null, null, true, false, null, null, null, appUsername);
     }
     return new AgentProfileState(
-        entity.agentPassEncrypted != null && !entity.agentPassEncrypted.isBlank(),
+        hasAgentPass,
         entity.lastPhoneLogin,
         entity.lastCampaign,
         entity.rememberCredentials,
@@ -41,14 +58,14 @@ public class VicidialCredentialService {
   }
 
   public void updateAgentPass(String appUsername, String agentPass) throws Exception {
-    var entity = getOrCreate(appUsername);
-    entity.agentPassEncrypted = encrypt(agentPass);
-    entity.updatedAt = OffsetDateTime.now();
-    repo.save(entity);
+    var user = userRepository.findByUsername(appUsername)
+        .orElseThrow(() -> new IllegalStateException("No existe usuario para almacenar agent_pass"));
+    user.agentPassEncrypted = encrypt(agentPass);
+    userRepository.save(user);
   }
 
   public Optional<String> resolveAgentPass(String appUsername) {
-    return repo.findByAppUsername(appUsername)
+    return userRepository.findByUsername(appUsername)
         .map(e -> {
           if (e.agentPassEncrypted == null || e.agentPassEncrypted.isBlank()) return null;
           try {
@@ -57,6 +74,22 @@ public class VicidialCredentialService {
             throw new RuntimeException(ex);
           }
         });
+  }
+
+  public AgentVicidialCredentials resolveAgentCredentials(String appUsername) {
+    String agentUser = appUsername;
+    Optional<String> pass = resolveAgentPass(appUsername);
+    if (pass.isPresent()) {
+      return new AgentVicidialCredentials(agentUser, pass.get(), false, null);
+    }
+
+    if (isDevEnvironment()) {
+      String fallback = "dev_" + appUsername;
+      String warning = "DEV fallback activo: agent_pass ausente en users.agent_pass_encrypted. Usando valor temporal para pruebas.";
+      log.warn("{} agentUser={}", warning, mask(agentUser));
+      return new AgentVicidialCredentials(agentUser, fallback, true, warning);
+    }
+    return new AgentVicidialCredentials(agentUser, null, false, null);
   }
 
   public void saveLastSelection(String appUsername, String phoneLogin, String campaign, boolean rememberCredentials) {
@@ -98,6 +131,20 @@ public class VicidialCredentialService {
       return entity;
     });
   }
+
+  private boolean isDevEnvironment() {
+    boolean profileDev = Arrays.stream(environment.getActiveProfiles()).anyMatch("dev"::equalsIgnoreCase);
+    String appEnv = environment.getProperty("APP_ENV", environment.getProperty("app.env", ""));
+    return profileDev || "dev".equalsIgnoreCase(appEnv);
+  }
+
+  private String mask(String value) {
+    if (value == null || value.isBlank()) return "***";
+    if (value.length() <= 2) return "**";
+    return value.substring(0, 2) + "***" + value.substring(value.length() - 1);
+  }
+
+  public record AgentVicidialCredentials(String agentUser, String agentPass, boolean fallbackUsed, String warning) {}
 
   public record AgentProfileState(
       boolean hasAgentPass,

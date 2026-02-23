@@ -2,7 +2,12 @@ package com.telco3.agentui.agent;
 
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialDiagnosticsService;
+import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialSessionClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -10,17 +15,21 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class AgentVicidialSessionService {
+  private static final Logger log = LoggerFactory.getLogger(AgentVicidialSessionService.class);
+
   private final VicidialSessionClient sessionClient;
   private final VicidialClient vicidialClient;
   private final VicidialCredentialService credentialService;
   private final VicidialDiagnosticsService diagnosticsService;
+  private final Environment environment;
   private final Map<String, AgentVicidialState> stateByAgent = new ConcurrentHashMap<>();
 
-  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService, VicidialDiagnosticsService diagnosticsService) {
+  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService, VicidialDiagnosticsService diagnosticsService, Environment environment) {
     this.sessionClient = sessionClient;
     this.vicidialClient = vicidialClient;
     this.credentialService = credentialService;
     this.diagnosticsService = diagnosticsService;
+    this.environment = environment;
   }
 
   public Map<String, Object> connectPhone(String agentUser, String phoneLogin) {
@@ -51,11 +60,48 @@ public class AgentVicidialSessionService {
     return Map.of("ok", true);
   }
 
-  public Map<String, Object> listCampaigns(String agentUser) {
-    AgentVicidialState state = requirePhoneConnected(agentUser);
-    String raw = vicidialClient.campaignsForAgent(agentUser, state.phoneLogin, buildPhonePass(state.phoneLogin));
-    List<String> campaigns = parseCampaigns(raw);
-    return Map.of("phoneLogin", state.phoneLogin, "campaigns", campaigns, "raw", raw);
+  public Map<String, Object> listCampaigns(String appUsername) {
+    AgentVicidialState state = requirePhoneConnected(appUsername);
+    VicidialCredentialService.AgentVicidialCredentials credentials = credentialService.resolveAgentCredentials(appUsername);
+
+    if (credentials.agentPass() == null || credentials.agentPass().isBlank()) {
+      throw new VicidialServiceException(
+          HttpStatus.BAD_REQUEST,
+          "VICIDIAL_AGENT_CREDENTIALS_MISSING",
+          "Falta agent_pass del agente en tabla users. El administrador debe completarlo para continuar.",
+          "Actualice users.agent_pass_encrypted para el usuario autenticado.",
+          Map.of("agentUser", credentials.agentUser(), "phoneLogin", state.phoneLogin)
+      );
+    }
+
+    String phonePass = buildPhonePass(state.phoneLogin);
+    var result = vicidialClient.campaignsForAgent(credentials.agentUser(), credentials.agentPass(), state.phoneLogin, phonePass);
+    debugCampaignCall(credentials.agentUser(), state.phoneLogin, result.statusCode(), result.snippet(), credentials.fallbackUsed());
+
+    List<String> campaigns = parseCampaigns(result.body());
+    if (campaigns.isEmpty()) {
+      throw new VicidialServiceException(
+          HttpStatus.BAD_REQUEST,
+          "VICIDIAL_EMPTY_CAMPAIGNS",
+          "Vicidial respondió sin campañas para el agente autenticado.",
+          "Verifique user/agent_pass del agente, phone_login conectado y permisos de campaña en Vicidial.",
+          Map.of(
+              "agentUser", mask(credentials.agentUser()),
+              "phoneLogin", state.phoneLogin,
+              "statusCode", result.statusCode(),
+              "rawSnippet", result.snippet()
+          )
+      );
+    }
+
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("phoneLogin", state.phoneLogin);
+    response.put("campaigns", campaigns);
+    response.put("raw", result.body());
+    if (credentials.fallbackUsed()) {
+      response.put("warning", credentials.warning());
+    }
+    return response;
   }
 
   public Map<String, Object> connectCampaign(String agentUser, String campaignId, String mode, boolean remember) {
@@ -124,6 +170,32 @@ public class AgentVicidialSessionService {
       raw.lines().map(String::trim).filter(line -> !line.isBlank()).forEach(campaigns::add);
     }
     return campaigns.stream().limit(200).toList();
+  }
+
+  private void debugCampaignCall(String agentUser, String phoneLogin, int statusCode, String snippet, boolean fallbackUsed) {
+    if (!isDevEnvironment()) {
+      return;
+    }
+    log.info(
+        "Vicidial campaigns debug endpoint=/agc/api.php function=campaign_status agentUser={} phone_login={} status={} snippet={} fallbackUsed={}",
+        mask(agentUser),
+        phoneLogin,
+        statusCode,
+        snippet,
+        fallbackUsed
+    );
+  }
+
+  private boolean isDevEnvironment() {
+    boolean profileDev = Arrays.stream(environment.getActiveProfiles()).anyMatch("dev"::equalsIgnoreCase);
+    String appEnv = environment.getProperty("APP_ENV", environment.getProperty("app.env", ""));
+    return profileDev || "dev".equalsIgnoreCase(appEnv);
+  }
+
+  private String mask(String value) {
+    if (value == null || value.isBlank()) return "***";
+    if (value.length() <= 2) return "**";
+    return value.substring(0, 2) + "***" + value.substring(value.length() - 1);
   }
 
   static class AgentVicidialState {

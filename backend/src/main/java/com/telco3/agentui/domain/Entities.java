@@ -12,6 +12,7 @@ public class Entities {
     @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;
     @Column(nullable=false, unique=true) public String username;
     @Column(nullable=false) public String passwordHash;
+    @Column(columnDefinition = "text") public String agentPassEncrypted;
     @Enumerated(EnumType.STRING) @Column(nullable=false) public Role role;
     public boolean active = true;
     public OffsetDateTime createdAt = OffsetDateTime.now();
