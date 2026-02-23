@@ -2,7 +2,7 @@ import { Alert, Box, Button, Card, CardContent, Checkbox, Chip, Container, Divid
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { connectVicidialCampaign, connectVicidialPhone, disconnectVicidialPhone, getActiveLead, getAgentProfile, getContext, getVicidialCampaigns, getVicidialStatus, pauseAction, previewAction, retryInteraction, saveInteraction, updateAgentProfilePass } from '../api/sdk';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 export default function AgentPage(){
  const [sp]=useSearchParams();
@@ -46,6 +46,13 @@ export default function AgentPage(){
  const canType = phoneConnected && campaignConnected;
  const availableCampaigns = campaignsQuery.data?.campaigns || [];
 
+
+ useEffect(() => {
+  if (!phoneLogin && profile.data?.lastPhoneLogin) {
+    setPhoneLogin(profile.data.lastPhoneLogin);
+  }
+ }, [phoneLogin, profile.data?.lastPhoneLogin]);
+
  const topInfo = useMemo(() => ({
   phone: status.data?.phoneLogin || profile.data?.lastPhoneLogin || '-',
   campaign: status.data?.campaign || profile.data?.lastCampaign || '-',
@@ -59,16 +66,21 @@ export default function AgentPage(){
       <Chip label={`Anexo: ${topInfo.phone}`} size='small' variant='outlined' />
       <Chip label={phoneConnected ? 'Phone: conectado' : 'Phone: desconectado'} size='small' color={phoneConnected ? 'success' : 'default'} />
       <Chip label={`Campaña: ${topInfo.campaign}`} size='small' variant='outlined' />
-      <Button variant='text' onClick={(e)=>setProfileMenuAnchor(e.currentTarget)}>Perfil</Button>
-      <Button variant='outlined' color='inherit' onClick={logout}>Cerrar sesión</Button>
+      <Button variant='text' onClick={(e)=>setProfileMenuAnchor(e.currentTarget)}>Cuenta</Button>
     </Stack>
   </Stack>
 
   <Menu anchorEl={profileMenuAnchor} open={Boolean(profileMenuAnchor)} onClose={()=>setProfileMenuAnchor(null)}>
-    <Box sx={{p:2, minWidth:300}}>
-      <Typography variant='subtitle2' sx={{mb:1}}>Actualizar agent_pass</Typography>
+    <Box sx={{p:2, minWidth:320}}>
+      <Typography variant='subtitle2'>Perfil</Typography>
+      <Typography variant='body2' color='text.secondary'>Usuario: {profile.data?.agentUser || '-'}</Typography>
+      <Typography variant='body2' color='text.secondary'>Anexo: {topInfo.phone}</Typography>
+      <Typography variant='body2' color='text.secondary' sx={{mb:1}}>Agent pass: {profile.data?.hasAgentPass ? '••••••••' : 'No configurado'}</Typography>
       <TextField size='small' fullWidth type='password' label='Nuevo agent_pass' value={agentPass} onChange={e=>setAgentPass(e.target.value)} />
       <Button sx={{mt:1}} variant='contained' fullWidth disabled={!agentPass} onClick={()=>updatePass.mutate({agentPass})}>Guardar</Button>
+      <Divider sx={{my:1}} />
+      <MenuItem onClick={()=>{setProfileMenuAnchor(null);}}>Perfil</MenuItem>
+      <MenuItem onClick={()=>{setProfileMenuAnchor(null);logout();}}>Cerrar sesión</MenuItem>
     </Box>
   </Menu>
 

@@ -22,5 +22,7 @@ spring:
 app:
   jwt-secret: ${JWT_SECRET:12345678901234567890123456789012}
   crypto-key: ${APP_CRYPTO_KEY:1234567890123456}
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
 server:
   port: 8080
