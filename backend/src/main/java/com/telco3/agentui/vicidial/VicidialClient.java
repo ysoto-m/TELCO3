@@ -82,6 +82,16 @@ public class VicidialClient {
     return call("/agc/api.php", new HashMap<>(Map.of("function", "live_agents")));
   }
 
+
+
+  public String campaignsForAgent(String agentUser, String phoneLogin, String phonePass) {
+    var params = new HashMap<String, String>();
+    params.put("function", "campaign_status");
+    params.put("agent_user", agentUser);
+    params.put("phone_login", phoneLogin);
+    params.put("phone_pass", phonePass);
+    return call("/agc/api.php", params);
+  }
   public String campaigns() {
     return call("/agc/api.php", new HashMap<>(Map.of("function", "campaign_status")));
   }

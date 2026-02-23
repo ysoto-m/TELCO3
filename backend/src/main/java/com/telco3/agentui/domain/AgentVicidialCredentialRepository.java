@@ -7,4 +7,5 @@ import java.util.Optional;
 
 public interface AgentVicidialCredentialRepository extends JpaRepository<AgentVicidialCredentialEntity, Long> {
   Optional<AgentVicidialCredentialEntity> findByAppUsernameAndAgentUser(String appUsername, String agentUser);
+  Optional<AgentVicidialCredentialEntity> findByAppUsername(String appUsername);
 }

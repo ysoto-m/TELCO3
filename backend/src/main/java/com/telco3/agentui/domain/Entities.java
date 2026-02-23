@@ -50,10 +50,14 @@ public class Entities {
     @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;
     @Column(nullable = false) public String appUsername;
     @Column(nullable = false) public String agentUser;
-    @Column(nullable = false, columnDefinition = "text") public String agentPassEncrypted;
-    @Column(nullable = false) public String phoneLogin;
-    @Column(nullable = false, columnDefinition = "text") public String phonePassEncrypted;
-    public String campaign;
+    @Column(columnDefinition = "text") public String agentPassEncrypted;
+    public String lastPhoneLogin;
+    public String lastCampaign;
+    public boolean rememberCredentials = true;
+    public boolean connected;
+    public String connectedPhoneLogin;
+    public String connectedCampaign;
+    public OffsetDateTime connectedAt;
     public OffsetDateTime updatedAt = OffsetDateTime.now();
   }
 }
