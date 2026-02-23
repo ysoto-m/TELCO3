@@ -1,6 +1,6 @@
 package com.telco3.agentui.vicidial;
 
-import com.telco3.agentui.settings.SettingsController;
+
 import org.springframework.stereotype.Component;
 
 import java.net.CookieManager;
@@ -19,16 +19,16 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class VicidialSessionClient {
-  private final SettingsController settingsController;
+  private final VicidialConfigService configService;
   private final Map<String, SessionContext> sessionByAgent = new ConcurrentHashMap<>();
 
-  public VicidialSessionClient(SettingsController settingsController) {
-    this.settingsController = settingsController;
+  public VicidialSessionClient(VicidialConfigService configService) {
+    this.configService = configService;
   }
 
   public String connectPhone(String agentUser, String phoneLogin, String phonePass) {
-    var settings = settingsController.current();
-    String baseUrl = normalizeBaseUrl(settings.baseUrl);
+    var settings = configService.resolve();
+    String baseUrl = normalizeBaseUrl(settings.baseUrl());
 
     SessionContext existing = sessionByAgent.get(agentUser);
     CookieManager cookieManager = existing == null

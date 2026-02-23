@@ -96,7 +96,9 @@ class AgentVicidialStatusControllerTest {
 
     mockMvc.perform(get("/api/agent/vicidial/status"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.ok").value(true))
-        .andExpect(jsonPath("$.agentUser").value("agent1"));
+
+        .andExpect(jsonPath("$.agentUser").value("agent1"))
+        .andExpect(jsonPath("$.apiPass").doesNotExist())
+        .andExpect(jsonPath("$.pass").doesNotExist());
   }
 }

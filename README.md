@@ -4,8 +4,9 @@
 - `JWT_SECRET`
 - `APP_CRYPTO_KEY` (AES, 16 bytes recomendados para cifrado de settings y credenciales de agente)
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASS`
-- `VICIDIAL_BASE_URL` (se configura en `/api/admin/settings` o `/api/settings/vicidial`)
-- `VICIDIAL_API_USER`, `VICIDIAL_API_PASS`, `VICIDIAL_SOURCE` (idem settings)
+- `VICIDIAL_BASE_URL` (se configura en `/api/admin/config/vicidial` o `/api/settings/vicidial`)
+- `VICIDIAL_API_USER`, `VICIDIAL_API_PASS` (idem settings)
+- `VICIDIAL_SOURCE` (opcional: solo se envía a Vicidial cuando está configurado)
 - `BACKEND_BASE_URL`, `FRONTEND_BASE_URL`
 
 > Nota: este backend mantiene JWT + Spring Security y actúa como gateway entre Vicidial y Postgres local.
@@ -67,7 +68,8 @@ curl -X POST http://localhost:8080/api/agent/logout-from-vicidial -H 'Authorizat
 - `GET /api/admin/interactions`: paginado + filtros (`campaign`, `agentUser`, `dispo`, `from`, `to`, `page`, `size`).
 - `GET /api/admin/interactions/export.csv`: export CSV con filtros.
 - `GET/POST/PUT /api/admin/users`: CRUD básico de usuarios.
-- `GET/PUT /api/admin/settings`: settings de Vicidial.
+- `GET/PUT /api/admin/settings`: compatibilidad legacy de settings de Vicidial.
+- `GET/PUT /api/admin/config/vicidial`: endpoint recomendado para gestionar credenciales/config en BD (con password enmascarado en GET).
 
 ### Frontend
 - Ruta `/admin` con:
