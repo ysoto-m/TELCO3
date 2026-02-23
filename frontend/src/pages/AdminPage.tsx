@@ -2,10 +2,12 @@ import { Alert, Box, Button, Card, CardContent, Container, Grid, Stack, Table, T
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { adminAgents, adminCampaigns, adminCreateUser, adminExportCsvUrl, adminInteractions, adminSettings, adminSummary, adminUpdateSettings, adminUsers } from '../api/sdk';
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const today = new Date().toISOString().slice(0, 10);
 
 export default function AdminPage(){
+  const navigate = useNavigate();
   const [filters, setFilters] = useState({ campaign: '', agentUser: '', dispo: '', from: today, to: today, page: 0, size: 20 });
   const summary = useQuery({ queryKey:['admin-summary'], queryFn: adminSummary, refetchInterval: 8000 });
   const agents = useQuery({ queryKey:['admin-agents'], queryFn: adminAgents, refetchInterval: 8000 });
@@ -18,6 +20,13 @@ export default function AdminPage(){
   const [newUser,setNewUser]=useState({username:'',password:'',role:'AGENT',active:true});
   const [cfg,setCfg]=useState<any>(null);
 
+  const logout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('role');
+    sessionStorage.clear();
+    navigate('/login', { replace: true });
+  };
+
   const exportUrl = useMemo(()=>adminExportCsvUrl(filters), [filters]);
   const k:any = summary.data || {};
   const rows:any[] = agents.data?.items || [];
@@ -25,7 +34,10 @@ export default function AdminPage(){
 
   return <Container maxWidth='xl' sx={{py:3}}>
     <Stack gap={2}>
-      <Typography variant='h4'>Admin Dashboard</Typography>
+      <Stack direction='row' justifyContent='space-between' alignItems='center'>
+        <Typography variant='h4'>Admin Dashboard</Typography>
+        <Button variant='outlined' color='inherit' onClick={logout}>Cerrar sesión</Button>
+      </Stack>
       {k.degraded && <Alert severity='warning'>Vicidial degradado: se muestran datos parciales/locales.</Alert>}
       <Grid container spacing={2}>
         {[['Agentes activos',k.activeAgents],['Incall',k.incallAgents],['Pausados',k.pausedAgents],['Interacciones hoy',k.interactionsToday]].map(([label,value])=><Grid item xs={12} md={3} key={String(label)}><Card><CardContent><Typography variant='caption'>{label}</Typography><Typography variant='h4'>{String(value??0)}</Typography></CardContent></Card></Grid>)}
