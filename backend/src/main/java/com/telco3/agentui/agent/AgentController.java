@@ -5,6 +5,7 @@ import com.telco3.agentui.domain.Entities.*;
 import com.telco3.agentui.domain.*;
 import com.telco3.agentui.vicidial.VicidialClient;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -16,9 +17,53 @@ public class AgentController {
   private final InteractionRepository interactions;
   private final CustomerRepository customers;
   private final CustomerPhoneRepository phones;
+  private final VicidialCredentialService credentialService;
   private final ObjectMapper mapper = new ObjectMapper();
-  public AgentController(VicidialClient vicidial, InteractionRepository interactions, CustomerRepository customers, CustomerPhoneRepository phones){
-    this.vicidial=vicidial; this.interactions=interactions; this.customers=customers; this.phones=phones;
+  public AgentController(VicidialClient vicidial, InteractionRepository interactions, CustomerRepository customers, CustomerPhoneRepository phones, VicidialCredentialService credentialService){
+    this.vicidial=vicidial; this.interactions=interactions; this.customers=customers; this.phones=phones; this.credentialService = credentialService;
+  }
+
+  public record AgentLoginReq(@NotBlank String agentUser, String agentPass, String phoneLogin, String phonePass, String campaign, Boolean rememberCredentials) {}
+
+  @PostMapping("/login-to-vicidial")
+  Map<String, Object> loginToVicidial(@RequestBody AgentLoginReq req, Authentication auth) throws Exception {
+    var resolved = resolveCredentials(req, auth == null ? null : auth.getName());
+    var raw = vicidial.agentLogin(resolved.agentUser, resolved.agentPass, resolved.phoneLogin, resolved.phonePass, resolved.campaign);
+    boolean ok = isSuccess(raw);
+    if (ok && Boolean.TRUE.equals(req.rememberCredentials()) && auth != null) {
+      credentialService.save(auth.getName(), resolved.agentUser, resolved.agentPass, resolved.phoneLogin, resolved.phonePass, resolved.campaign);
+    }
+    return Map.of("ok", ok, "raw", raw, "campaign", resolved.campaign, "agentUser", resolved.agentUser);
+  }
+
+  @PostMapping("/logout-from-vicidial")
+  Map<String, Object> logoutFromVicidial(@RequestBody Map<String, String> payload) {
+    String agentUser = Objects.toString(payload.get("agentUser"), "");
+    var raw = vicidial.agentLogout(agentUser);
+    return Map.of("ok", isSuccess(raw), "raw", raw);
+  }
+
+  @GetMapping("/status")
+  Map<String, Object> status(@RequestParam String agentUser) {
+    var raw = vicidial.agentStatus(agentUser);
+    return Map.of(
+        "agentUser", agentUser,
+        "status", extract(raw, "status"),
+        "campaign", extract(raw, "campaign"),
+        "extension", extract(raw, "extension"),
+        "paused", extract(raw, "paused"),
+        "raw", raw
+    );
+  }
+
+  @GetMapping("/campaigns")
+  Map<String, Object> campaigns(@RequestParam String agentUser) {
+    try {
+      var raw = vicidial.campaigns();
+      return Map.of("agentUser", agentUser, "campaignsRaw", raw, "limitation", "Vicidial API no siempre retorna campañas por agente; se expone raw para compatibilidad");
+    } catch (Exception e) {
+      return Map.of("agentUser", agentUser, "campaignsRaw", "", "limitation", "No fue posible consultar campañas en API actual", "error", e.getMessage());
+    }
   }
 
   @GetMapping("/active-lead")
@@ -86,4 +131,22 @@ public class AgentController {
     var m=java.util.regex.Pattern.compile(key+"=([^&\\n]+)").matcher(raw); return m.find()?m.group(1):"";
   }
   private Long extractLong(String raw,String key){ try{return Long.parseLong(extract(raw,key));}catch(Exception e){return null;} }
+
+  private boolean isSuccess(String raw) {
+    String r = Objects.toString(raw, "").toUpperCase(Locale.ROOT);
+    return r.contains("SUCCESS") || r.contains("LOGGED") || r.contains("OK");
+  }
+
+  private ResolvedAgentLogin resolveCredentials(AgentLoginReq req, String appUsername) {
+    if (req.agentPass() != null && req.phonePass() != null && req.phoneLogin() != null) {
+      return new ResolvedAgentLogin(req.agentUser(), req.agentPass(), req.phoneLogin(), req.phonePass(), req.campaign());
+    }
+    if (appUsername != null) {
+      var saved = credentialService.find(appUsername, req.agentUser()).orElseThrow(() -> new RuntimeException("No saved Vicidial credentials for agent"));
+      return new ResolvedAgentLogin(saved.agentUser(), saved.agentPass(), saved.phoneLogin(), saved.phonePass(), req.campaign() == null ? saved.campaign() : req.campaign());
+    }
+    throw new RuntimeException("Missing Vicidial credentials");
+  }
+
+  private record ResolvedAgentLogin(String agentUser, String agentPass, String phoneLogin, String phonePass, String campaign) {}
 }

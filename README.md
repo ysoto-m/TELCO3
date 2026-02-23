@@ -1,77 +1,84 @@
 # TELCO3 Agent UI para VICIdial (Backend + Frontend)
 
-## Variables a completar
-- `VICIDIAL_BASE_URL`, `VICIDIAL_API_USER`, `VICIDIAL_API_PASS`, `VICIDIAL_SOURCE`
+## Variables ENV necesarias
+- `JWT_SECRET`
+- `APP_CRYPTO_KEY` (AES, 16 bytes recomendados para cifrado de settings y credenciales de agente)
 - `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASS`
+- `VICIDIAL_BASE_URL` (se configura en `/api/admin/settings` o `/api/settings/vicidial`)
+- `VICIDIAL_API_USER`, `VICIDIAL_API_PASS`, `VICIDIAL_SOURCE` (idem settings)
 - `BACKEND_BASE_URL`, `FRONTEND_BASE_URL`
+
+> Nota: este backend mantiene JWT + Spring Security y actúa como gateway entre Vicidial y Postgres local.
 
 ## Usuario inicial
 - Usuario: `admin`
 - Password inicial: `admin123` (seed en Flyway V2, cambiar tras primer inicio).
 
-## SPRINT 0 — Contrato y scaffold
-- Contrato OpenAPI: `openapi/openapi.yaml`.
-- Estructura: `/backend`, `/frontend`, `/docker`.
-
-**Cómo correr**
+## Cómo correr
 ```bash
 cd backend && mvn spring-boot:run
 cd frontend && npm install && npm run dev
 ```
 
-**Cómo validar**
+## Flujo Agent Login real (Vicidial)
+### Endpoints
+- `POST /api/agent/login-to-vicidial`
+  - Body:
+  ```json
+  {
+    "agentUser": "1001",
+    "agentPass": "secret",
+    "phoneLogin": "SIP/1001",
+    "phonePass": "phoneSecret",
+    "campaign": "CAMP001",
+    "rememberCredentials": true
+  }
+  ```
+- `POST /api/agent/logout-from-vicidial`
+- `GET /api/agent/status?agentUser=1001`
+- `GET /api/agent/campaigns?agentUser=1001`
+  - Limitación: en algunos entornos Vicidial no devuelve campañas estrictamente por agente desde una sola función API; se entrega `raw` + mensaje de limitación.
+
+### Curl de prueba
 ```bash
-curl -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123"}'
+curl -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}'
+
+curl -X POST http://localhost:8080/api/agent/login-to-vicidial \
+  -H 'Authorization: Bearer <JWT>' \
+  -H 'Content-Type: application/json' \
+  -d '{"agentUser":"1001","agentPass":"secret","phoneLogin":"1001","phonePass":"phoneSecret","campaign":"CAMP001","rememberCredentials":true}'
+
+curl 'http://localhost:8080/api/agent/status?agentUser=1001' -H 'Authorization: Bearer <JWT>'
+curl -X POST http://localhost:8080/api/agent/logout-from-vicidial -H 'Authorization: Bearer <JWT>' -H 'Content-Type: application/json' -d '{"agentUser":"1001"}'
 ```
 
-## SPRINT 1 — Backend base
-- Spring Boot 3 + Java 21, JWT, roles AGENT/REPORT_ADMIN.
-- PostgreSQL + Hikari explícito + Flyway (`V1__init.sql`, `V2__seed_admin.sql`).
-- Settings GET/PUT (`apiPass` no se retorna).
-- Swagger: `/swagger-ui/index.html`.
+### Verificación de conexión real de agente en Vicidial
+1. Consumir `GET /api/agent/status?agentUser=...` y validar estado no vacío.
+2. En Admin Dashboard, revisar KPIs y tabla de agentes live (`/api/admin/agents`).
+3. Revisar reporte/live_agents en Vicidial (o endpoint `/api/admin/summary` que consulta `live_agents`) para confirmar que el agente figura conectado.
 
-**Cómo correr**
-```bash
-cd docker && docker compose up --build
-```
+## Admin Dashboard moderno (`/admin`, rol `REPORT_ADMIN`)
+### Endpoints backend protegidos con `hasRole("REPORT_ADMIN")`
+- `GET /api/admin/summary`: KPIs del día (agentes activos/incall/paused, interacciones del día), con modo degradado si Vicidial cae.
+- `GET /api/admin/agents`: tabla de agentes live.
+- `GET /api/admin/campaigns`: campañas (Vicidial o fallback local).
+- `GET /api/admin/interactions`: paginado + filtros (`campaign`, `agentUser`, `dispo`, `from`, `to`, `page`, `size`).
+- `GET /api/admin/interactions/export.csv`: export CSV con filtros.
+- `GET/POST/PUT /api/admin/users`: CRUD básico de usuarios.
+- `GET/PUT /api/admin/settings`: settings de Vicidial.
 
-**Cómo validar**
-```bash
-curl http://localhost:8080/actuator/health
-```
+### Frontend
+- Ruta `/admin` con:
+  - Cards KPI.
+  - Tabla de agentes con búsqueda.
+  - Sección campañas.
+  - Sección interactions con filtros + export.
+  - Sección usuarios y settings.
+- Polling cada 8s para `summary` y `agents`.
+- Si Vicidial está caído, la UI muestra warning de degradación y sigue operando con datos locales.
 
-## SPRINT 2 — VICIdial + Context/Tipificación
-- Cliente `WebClient` encapsulado en backend.
-- `/api/agent/active-lead`, `/api/agent/context`, `/api/agent/interactions`, retry.
-- `syncStatus`: `PENDING|SYNCED|FAILED`.
-
-## SPRINT 3 — Preview/Manual
-- `/api/agent/preview-action`
-- `/api/agent/pause`
-
-## SPRINT 4 — Import CSV
-- `/api/vicidial/leads/import`
-- CSV mínimo: `dni,first_name,last_name,phone_number,list_id`
-- Upsert customers + phones y `add_lead` por fila.
-
-## SPRINT 5 — Frontend completo basado en OpenAPI
-- React + MUI + Router + TanStack Query + RHF+Zod.
-- Cliente frontend (`frontend/src/api/sdk.ts`) usando únicamente contrato definido.
-- Pantallas: Login, Agent Atención (predictivo/preview), Admin settings/import/reports.
-- Generación tipos OpenAPI:
-```bash
-cd frontend && npm run generate:api
-```
-
-## SPRINT 6 — Hardening
-- Respuesta de error consistente (`ApiExceptionHandler`).
-- Recomendaciones de seguridad:
-  - Exponer backend solamente en red privada.
-  - Allowlist IP de backend hacia VICIdial.
-  - Rotar `JWT_SECRET` y `APP_CRYPTO_KEY`.
-  - Cambiar password seed admin.
-
-## TODOs (anti-invención)
-- Parseo robusto de respuestas VICIdial depende formato exacto en ambiente real.
-- Ajustar `dispoOptions` desde configuración real (hoy lista mínima fija).
-- Añadir tests de integración contra sandbox VICIdial real.
+## Notas de compatibilidad
+- No se rompe Vicidial: las llamadas existentes (`external_status`, `preview_dial_action`, `external_pause`, etc.) se mantienen.
+- Seguridad JWT/Spring Security permanece activa.

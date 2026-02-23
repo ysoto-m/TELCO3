@@ -55,7 +55,7 @@ public class SecurityConfig {
       .authorizeHttpRequests(a->a
         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
         .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll()
-        .requestMatchers("/api/settings/**","/api/vicidial/**","/api/reports/**").hasRole("REPORT_ADMIN")
+        .requestMatchers("/api/settings/**","/api/vicidial/**","/api/reports/**","/api/admin/**").hasRole("REPORT_ADMIN")
         .anyRequest().authenticated())
       .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
       .build();

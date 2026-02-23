@@ -21,12 +21,12 @@ public class SettingsController {
   public record SettingsReq(@NotBlank String baseUrl,@NotBlank String apiUser,@NotBlank String apiPass,@NotBlank String source){}
 
   @GetMapping("/vicidial")
-  Map<String,Object> get(){
+  public Map<String,Object> get(){
     var s=repo.findById(1L).orElse(new VicidialSettingsEntity());
     return Map.of("baseUrl",n(s.baseUrl),"apiUser",n(s.apiUser),"source",n(s.source),"updatedAt",s.updatedAt==null?OffsetDateTime.now():s.updatedAt);
   }
   @PutMapping("/vicidial")
-  Map<String,Object> put(@RequestBody SettingsReq req) throws Exception {
+  public Map<String,Object> put(@RequestBody SettingsReq req) throws Exception {
     var s=repo.findById(1L).orElse(new VicidialSettingsEntity());
     s.id=1L; s.baseUrl=req.baseUrl(); s.apiUser=req.apiUser(); s.apiPassEncrypted=encrypt(req.apiPass()); s.source=req.source(); s.updatedAt=OffsetDateTime.now();
     repo.save(s); return Map.of("ok",true);
