@@ -54,40 +54,35 @@ components:
       required: [agentPass]
       properties:
         agentPass: { type: string }
-    AvailableCampaignsRequest:
+    PhoneConnectRequest:
       type: object
       required: [phoneLogin]
       properties:
         phoneLogin: { type: string }
-    AvailableCampaignsResponse:
+    CampaignConnectRequest:
+      type: object
+      required: [campaignId]
+      properties:
+        campaignId: { type: string }
+        mode: { type: string, enum: [predictive, manual], default: predictive }
+        rememberCredentials: { type: boolean, default: true }
+    VicidialCampaignsResponse:
       type: object
       properties:
         phoneLogin: { type: string }
-        generatedPhonePass: { type: string }
         campaigns:
           type: array
           items: { type: string }
         raw: { type: string }
-        error: { type: string, nullable: true }
-    VicidialConnectRequest:
-      type: object
-      required: [phoneLogin, campaign]
-      properties:
-        phoneLogin: { type: string }
-        campaign: { type: string }
-        rememberCredentials: { type: boolean, default: true }
     VicidialStatusResponse:
       type: object
       properties:
         agentUser: { type: string }
-        status: { type: string }
-        campaign: { type: string }
-        extension: { type: string }
-        paused: { type: string }
-        connected: { type: boolean }
-        connectedCampaign: { type: string, nullable: true }
-        connectedPhoneLogin: { type: string, nullable: true }
-        raw: { type: string }
+        phoneConnected: { type: boolean }
+        phoneLogin: { type: string, nullable: true }
+        campaign: { type: string, nullable: true }
+        mode: { type: string, enum: [predictive, manual], nullable: true }
+        typingEnabled: { type: boolean }
     ActiveLeadResponse:
       type: object
       properties:
@@ -132,10 +127,9 @@ components:
           items: { type: string }
     InteractionRequest:
       type: object
-      required: [agentUser, mode, leadId, phoneNumber, campaign, dni, dispo]
+      required: [mode, leadId, phoneNumber, campaign, dni, dispo]
       properties:
-        agentUser: { type: string }
-        mode: { type: string, enum: [predictive, preview] }
+        mode: { type: string, enum: [predictive, manual] }
         leadId: { type: integer }
         phoneNumber: { type: string }
         campaign: { type: string }
@@ -151,17 +145,15 @@ components:
         message: { type: string }
     PreviewActionRequest:
       type: object
-      required: [agentUser, leadId, campaign, action]
+      required: [leadId, campaign, action]
       properties:
-        agentUser: { type: string }
         leadId: { type: integer }
         campaign: { type: string }
         action: { type: string, enum: [DIALONLY, SKIP, FINISH] }
     PauseRequest:
       type: object
-      required: [agentUser, action]
+      required: [action]
       properties:
-        agentUser: { type: string }
         action: { type: string, enum: [PAUSE, RESUME] }
     OkResponse:
       type: object
@@ -230,33 +222,20 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OkResponse' }
-  /api/agent/campaigns/available:
+  /api/agent/vicidial/phone/connect:
     post:
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/AvailableCampaignsRequest' }
-      responses:
-        '200':
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/AvailableCampaignsResponse' }
-  /api/agent/vicidial/connect:
-    post:
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/VicidialConnectRequest' }
+            schema: { $ref: '#/components/schemas/PhoneConnectRequest' }
       responses:
         '200':
           content:
             application/json:
               schema: { type: object, additionalProperties: true }
-  /api/agent/vicidial/disconnect:
+  /api/agent/vicidial/phone/disconnect:
     post:
       security: [{ bearerAuth: [] }]
       responses:
@@ -264,6 +243,27 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/vicidial/campaigns:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VicidialCampaignsResponse' }
+  /api/agent/vicidial/campaign/connect:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CampaignConnectRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
   /api/agent/vicidial/status:
     get:
       security: [{ bearerAuth: [] }]
@@ -290,11 +290,6 @@ paths:
   /api/agent/active-lead:
     get:
       security: [{ bearerAuth: [] }]
-      parameters:
-        - name: agentUser
-          in: query
-          required: true
-          schema: { type: string }
       responses:
         '200':
           content:
@@ -304,11 +299,10 @@ paths:
     get:
       security: [{ bearerAuth: [] }]
       parameters:
-        - { name: agentUser, in: query, required: true, schema: { type: string } }
         - { name: leadId, in: query, required: false, schema: { type: integer } }
         - { name: phone, in: query, required: false, schema: { type: string } }
         - { name: campaign, in: query, required: false, schema: { type: string } }
-        - { name: mode, in: query, required: true, schema: { type: string, enum: [predictive, preview] } }
+        - { name: mode, in: query, required: true, schema: { type: string, enum: [predictive, manual] } }
       responses:
         '200':
           content:

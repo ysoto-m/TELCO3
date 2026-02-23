@@ -12,6 +12,11 @@ public class ApiExceptionHandler {
   ResponseEntity<?> validation(MethodArgumentNotValidException ex){
     return ResponseEntity.badRequest().body(Map.of("error","VALIDATION_ERROR","message",ex.getBindingResult().getFieldError().getDefaultMessage()));
   }
+  @ExceptionHandler(IllegalStateException.class)
+  ResponseEntity<?> illegalState(IllegalStateException ex){
+    return ResponseEntity.badRequest().body(Map.of("error","BUSINESS_ERROR","message",ex.getMessage()));
+  }
+
   @ExceptionHandler(Exception.class)
   ResponseEntity<?> generic(Exception ex){
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error","INTERNAL_ERROR","message",ex.getMessage()));

@@ -6,12 +6,14 @@ export const putSettings = (payload:any)=>api.put('/api/settings/vicidial',paylo
 
 export const getAgentProfile = ()=>api.get('/api/agent/profile').then(r=>r.data);
 export const updateAgentProfilePass = (payload:{agentPass:string})=>api.put('/api/agent/profile/agent-pass',payload).then(r=>r.data);
-export const getAvailableCampaigns = (payload:{phoneLogin:string})=>api.post('/api/agent/campaigns/available',payload).then(r=>r.data);
-export const connectVicidial = (payload:{phoneLogin:string;campaign:string;rememberCredentials?:boolean})=>api.post('/api/agent/vicidial/connect',payload).then(r=>r.data);
-export const disconnectVicidial = ()=>api.post('/api/agent/vicidial/disconnect').then(r=>r.data);
+
+export const connectVicidialPhone = (payload:{phoneLogin:string})=>api.post('/api/agent/vicidial/phone/connect',payload).then(r=>r.data);
+export const disconnectVicidialPhone = ()=>api.post('/api/agent/vicidial/phone/disconnect').then(r=>r.data);
+export const getVicidialCampaigns = ()=>api.get('/api/agent/vicidial/campaigns').then(r=>r.data);
+export const connectVicidialCampaign = (payload:{campaignId:string;mode?:'predictive'|'manual';rememberCredentials?:boolean})=>api.post('/api/agent/vicidial/campaign/connect',payload).then(r=>r.data);
 export const getVicidialStatus = ()=>api.get('/api/agent/vicidial/status').then(r=>r.data);
 
-export const getActiveLead = (agentUser:string)=>api.get('/api/agent/active-lead',{params:{agentUser}}).then(r=>r.data);
+export const getActiveLead = ()=>api.get('/api/agent/active-lead').then(r=>r.data);
 export const getContext = (p:any)=>api.get('/api/agent/context',{params:p}).then(r=>r.data);
 export const saveInteraction = (payload:any)=>api.post('/api/agent/interactions',payload).then(r=>r.data);
 export const retryInteraction = (id:number)=>api.post(`/api/agent/interactions/${id}/retry-vicidial`).then(r=>r.data);
