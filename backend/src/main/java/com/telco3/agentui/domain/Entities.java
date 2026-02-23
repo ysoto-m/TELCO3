@@ -45,24 +45,6 @@ public class Entities {
     public OffsetDateTime createdAt = OffsetDateTime.now();
   }
 
-  @Entity @Table(name="interactions")
-  public static class InteractionEntity {
-    @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;
-    public Long customerId;
-    public String dni;
-    public String phoneNumber;
-    public Long leadId;
-    public String campaign;
-    public String agentUser;
-    public String mode;
-    public String dispo;
-    @Column(columnDefinition="text") public String notes;
-    @Column(columnDefinition="text") public String extraJson;
-    @Enumerated(EnumType.STRING) public SyncStatus syncStatus = SyncStatus.PENDING;
-    @Column(columnDefinition="text") public String lastError;
-    public OffsetDateTime createdAt = OffsetDateTime.now();
-  }
-
   @Entity @Table(name="agent_vicidial_credentials")
   public static class AgentVicidialCredentialEntity {
     @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;
