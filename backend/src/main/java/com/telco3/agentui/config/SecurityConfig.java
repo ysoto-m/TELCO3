@@ -19,6 +19,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.*;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.stereotype.Component;
+import org.springframework.web.cors.CorsUtils;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -54,17 +55,15 @@ public class SecurityConfig {
         HttpHeaders.AUTHORIZATION,
         HttpHeaders.CONTENT_TYPE,
         HttpHeaders.ACCEPT,
-        HttpHeaders.ORIGIN,
-        "X-Requested-With",
-        "Cache-Control",
-        "Pragma"
+        HttpHeaders.ORIGIN
     ));
     config.setExposedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
     config.setAllowCredentials(true);
     config.setMaxAge(3600L);
 
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-    source.registerCorsConfiguration("/**", config);
+    source.registerCorsConfiguration("/api/**", config);
+    source.registerCorsConfiguration("/api/agent/vicidial/**", config);
     return source;
   }
 
@@ -73,7 +72,8 @@ public class SecurityConfig {
       .cors(withDefaults())
       .sessionManagement(s->s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
       .authorizeHttpRequests(a->a
-        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+        .requestMatchers(CorsUtils::isPreFlightRequest).permitAll()
+        .requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()
         .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll()
         .requestMatchers("/api/settings/**","/api/vicidial/**","/api/reports/**","/api/admin/**").hasRole("REPORT_ADMIN")
         .anyRequest().authenticated())
