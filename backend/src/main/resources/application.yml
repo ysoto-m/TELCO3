@@ -20,6 +20,7 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 app:
+  env: ${APP_ENV:}
   jwt-secret: ${JWT_SECRET:12345678901234567890123456789012}
   crypto-key: ${APP_CRYPTO_KEY:1234567890123456}
   cors:

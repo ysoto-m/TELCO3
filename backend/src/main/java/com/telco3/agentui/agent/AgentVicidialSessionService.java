@@ -1,6 +1,7 @@
 package com.telco3.agentui.agent;
 
 import com.telco3.agentui.vicidial.VicidialClient;
+import com.telco3.agentui.vicidial.VicidialDiagnosticsService;
 import com.telco3.agentui.vicidial.VicidialSessionClient;
 import org.springframework.stereotype.Service;
 
@@ -12,12 +13,14 @@ public class AgentVicidialSessionService {
   private final VicidialSessionClient sessionClient;
   private final VicidialClient vicidialClient;
   private final VicidialCredentialService credentialService;
+  private final VicidialDiagnosticsService diagnosticsService;
   private final Map<String, AgentVicidialState> stateByAgent = new ConcurrentHashMap<>();
 
-  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService) {
+  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService, VicidialDiagnosticsService diagnosticsService) {
     this.sessionClient = sessionClient;
     this.vicidialClient = vicidialClient;
     this.credentialService = credentialService;
+    this.diagnosticsService = diagnosticsService;
   }
 
   public Map<String, Object> connectPhone(String agentUser, String phoneLogin) {
@@ -82,8 +85,10 @@ public class AgentVicidialSessionService {
   }
 
   public Map<String, Object> status(String agentUser) {
+    diagnosticsService.assertVicidialReadyOrThrow();
     AgentVicidialState state = stateByAgent.get(agentUser);
     Map<String, Object> response = new LinkedHashMap<>();
+    response.put("ok", true);
     response.put("agentUser", agentUser);
     response.put("phoneConnected", state != null && state.phoneConnected);
     response.put("phoneLogin", state == null ? null : state.phoneLogin);
