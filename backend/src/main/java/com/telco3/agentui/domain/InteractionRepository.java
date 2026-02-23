@@ -30,6 +30,12 @@ public interface InteractionRepository extends JpaRepository<InteractionEntity,L
      Pageable pageable
  );
 
- @Query("select distinct i.campaign from InteractionEntity i where i.campaign is not null and i.campaign <> ''")
+ @Query(value = """
+    select distinct i.campaign
+    from interactions i
+    where i.campaign is not null
+      and trim(i.campaign) <> ''
+    order by i.campaign
+ """, nativeQuery = true)
  List<String> findDistinctCampaigns();
 }
