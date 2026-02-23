@@ -12,6 +12,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,19 +36,19 @@ public class VicidialSessionClient {
         .connectTimeout(Duration.ofSeconds(8))
         .build();
 
-    String body = toForm(Map.of(
-        "DB", "0",
-        "JS_browser_height", "641",
-        "JS_browser_width", "695",
-        "LOGINvarONE", "",
-        "LOGINvarTWO", "",
-        "LOGINvarTHREE", "",
-        "LOGINvarFOUR", "",
-        "LOGINvarFIVE", "",
-        "hide_relogin_fields", "",
-        "phone_login", phoneLogin,
-        "phone_pass", phonePass
-    ));
+    Map<String, String> form = new LinkedHashMap<>();
+    form.put("DB", "0");
+    form.put("JS_browser_height", "641");
+    form.put("JS_browser_width", "695");
+    form.put("LOGINvarONE", "");
+    form.put("LOGINvarTWO", "");
+    form.put("LOGINvarTHREE", "");
+    form.put("LOGINvarFOUR", "");
+    form.put("LOGINvarFIVE", "");
+    form.put("hide_relogin_fields", "");
+    form.put("phone_login", phoneLogin);
+    form.put("phone_pass", phonePass);
+    String body = toForm(form);
 
     try {
       HttpRequest req = HttpRequest.newBuilder()
