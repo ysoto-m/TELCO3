@@ -1,11 +1,9 @@
 package com.telco3.agentui.vicidial;
 
-import com.telco3.agentui.domain.Entities;
-import com.telco3.agentui.settings.SettingsController;
-import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.core.env.Environment;
 
 import java.net.InetAddress;
 import java.net.URI;
@@ -21,11 +19,11 @@ import java.util.Objects;
 
 @Service
 public class VicidialDiagnosticsService {
-  private final SettingsController settingsController;
+  private final VicidialConfigService configService;
   private final Environment environment;
 
-  public VicidialDiagnosticsService(SettingsController settingsController, Environment environment) {
-    this.settingsController = settingsController;
+  public VicidialDiagnosticsService(VicidialConfigService configService, Environment environment) {
+    this.configService = configService;
     this.environment = environment;
   }
 
@@ -35,28 +33,12 @@ public class VicidialDiagnosticsService {
   }
 
   public VicidialResolvedConfig resolvedConfig() {
-    Entities.VicidialSettingsEntity settings = null;
-    try {
-      settings = settingsController.current();
-    } catch (Exception ignored) {
-    }
-
-    String baseUrl = firstNonBlank(environment.getProperty("VICIDIAL_BASE_URL"), settings == null ? null : settings.baseUrl);
-    String user = firstNonBlank(environment.getProperty("VICIDIAL_API_USER"), settings == null ? null : settings.apiUser);
-    String source = firstNonBlank(environment.getProperty("VICIDIAL_SOURCE"), settings == null ? null : settings.source);
-    String apiPass = environment.getProperty("VICIDIAL_API_PASS");
-    if (!StringUtils.hasText(apiPass) && settings != null && StringUtils.hasText(settings.apiPassEncrypted)) {
-      try {
-        apiPass = settingsController.decryptedPass();
-      } catch (Exception ignored) {
-      }
-    }
-
+    var resolved = configService.resolve();
     String healthPath = environment.getProperty("VICIDIAL_HEALTH_PATH", "/");
     if (!healthPath.startsWith("/")) {
       healthPath = "/" + healthPath;
     }
-    return new VicidialResolvedConfig(cleanBaseUrl(baseUrl), user, apiPass, source, healthPath);
+    return new VicidialResolvedConfig(resolved.baseUrl(), resolved.apiUser(), resolved.apiPass(), resolved.source(), healthPath, resolved.originHint());
   }
 
   public void assertVicidialReadyOrThrow() {
@@ -67,6 +49,7 @@ public class VicidialDiagnosticsService {
       Map<String, Object> details = new LinkedHashMap<>();
       details.put("cause", Objects.toString(probe.causeClass(), "Unknown"));
       details.put("error", Objects.toString(probe.error(), "No response"));
+      details.put("hint", config.originHint());
       throw new VicidialServiceException(
           HttpStatus.SERVICE_UNAVAILABLE,
           "VICIDIAL_UNREACHABLE",
@@ -78,12 +61,12 @@ public class VicidialDiagnosticsService {
   }
 
   public void validateConfigOrThrow(VicidialResolvedConfig config) {
-    if (!StringUtils.hasText(config.baseUrl()) || !isHttpUrl(config.baseUrl())) {
+    if (!StringUtils.hasText(config.baseUrl()) || !isHttpUrl(config.baseUrl()) || !StringUtils.hasText(config.user()) || !StringUtils.hasText(config.apiPass())) {
       throw new VicidialServiceException(
           HttpStatus.SERVICE_UNAVAILABLE,
           "VICIDIAL_CONFIG_MISSING",
-          "VICIDIAL_BASE_URL no está configurado. Configure VICIDIAL_BASE_URL en variables de entorno (por ejemplo: http://172.17.248.220).",
-          "Revisar docker-compose/.env y printenv dentro del contenedor",
+          "Falta configuración de Vicidial (BASE_URL/USER/PASS). Configure en el Panel Admin o variables de entorno.",
+          "Revisar panel Admin, docker-compose/.env y printenv dentro del contenedor. " + config.originHint(),
           null
       );
     }
@@ -128,21 +111,6 @@ public class VicidialDiagnosticsService {
     }
   }
 
-  private String cleanBaseUrl(String raw) {
-    String value = Objects.toString(raw, "").trim();
-    if (value.endsWith("/")) {
-      return value.substring(0, value.length() - 1);
-    }
-    return value;
-  }
-
-  private String firstNonBlank(String first, String second) {
-    if (StringUtils.hasText(first)) {
-      return first.trim();
-    }
-    return Objects.toString(second, "").trim();
-  }
-
   private String abbreviate(String msg) {
     if (!StringUtils.hasText(msg)) {
       return "Sin detalle";
@@ -151,7 +119,8 @@ public class VicidialDiagnosticsService {
     return normalized.length() > 200 ? normalized.substring(0, 200) : normalized;
   }
 
-  public record VicidialResolvedConfig(String baseUrl, String user, String apiPass, String source, String healthPath) {
+  public record VicidialResolvedConfig(String baseUrl, String user, String apiPass, String source, String healthPath,
+                                       String originHint) {
     public String maskedPass() {
       if (!StringUtils.hasText(apiPass)) {
         return "";

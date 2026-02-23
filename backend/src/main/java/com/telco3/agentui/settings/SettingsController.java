@@ -1,41 +1,47 @@
 package com.telco3.agentui.settings;
 
-import com.telco3.agentui.domain.Entities.VicidialSettingsEntity;
-import com.telco3.agentui.domain.SettingsRepository;
+import com.telco3.agentui.vicidial.VicidialConfigService;
 import jakarta.validation.constraints.NotBlank;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
-import java.time.OffsetDateTime;
-import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
-@RestController @RequestMapping("/api/settings")
+@RestController
+@RequestMapping("/api/settings")
 public class SettingsController {
-  private final SettingsRepository repo;
-  private final SecretKeySpec key;
-  public SettingsController(SettingsRepository repo,@Value("${app.crypto-key}") String k){this.repo=repo;this.key=new SecretKeySpec(k.getBytes(StandardCharsets.UTF_8),"AES");}
-  public record SettingsReq(@NotBlank String baseUrl,@NotBlank String apiUser,@NotBlank String apiPass,@NotBlank String source){}
+  private final VicidialConfigService configService;
+
+  public SettingsController(VicidialConfigService configService) {
+    this.configService = configService;
+  }
+
+  public record SettingsReq(@NotBlank String baseUrl, @NotBlank String apiUser, @NotBlank String apiPass, String source) {
+  }
 
   @GetMapping("/vicidial")
-  public Map<String,Object> get(){
-    var s=repo.findById(1L).orElse(new VicidialSettingsEntity());
-    return Map.of("baseUrl",n(s.baseUrl),"apiUser",n(s.apiUser),"source",n(s.source),"updatedAt",s.updatedAt==null?OffsetDateTime.now():s.updatedAt);
+  public Map<String, Object> get() {
+    var s = configService.getStoredConfigMasked();
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("baseUrl", n(s.baseUrl()));
+    response.put("apiUser", n(s.apiUser()));
+    response.put("apiPass", s.apiPassMasked());
+    response.put("source", n(s.source()));
+    response.put("updatedAt", s.updatedAt());
+    return response;
   }
+
   @PutMapping("/vicidial")
-  public Map<String,Object> put(@RequestBody SettingsReq req) throws Exception {
-    var s=repo.findById(1L).orElse(new VicidialSettingsEntity());
-    s.id=1L; s.baseUrl=req.baseUrl(); s.apiUser=req.apiUser(); s.apiPassEncrypted=encrypt(req.apiPass()); s.source=req.source(); s.updatedAt=OffsetDateTime.now();
-    repo.save(s); return Map.of("ok",true);
+  public Map<String, Object> put(@RequestBody SettingsReq req) {
+    configService.saveConfig(new VicidialConfigService.VicidialConfigUpdateRequest(req.baseUrl(), req.apiUser(), req.apiPass(), req.source()));
+    return Map.of("ok", true);
   }
-  public String decryptedPass() {
-    try { var s=repo.findById(1L).orElseThrow(); return decrypt(s.apiPassEncrypted);} catch(Exception e){ throw new RuntimeException(e);}
+
+  private String n(String s) {
+    return s == null ? "" : s;
   }
-  public VicidialSettingsEntity current(){ return repo.findById(1L).orElseThrow(); }
-  private String encrypt(String p) throws Exception { var c=Cipher.getInstance("AES"); c.init(Cipher.ENCRYPT_MODE,key); return Base64.getEncoder().encodeToString(c.doFinal(p.getBytes(StandardCharsets.UTF_8))); }
-  private String decrypt(String p) throws Exception { var c=Cipher.getInstance("AES"); c.init(Cipher.DECRYPT_MODE,key); return new String(c.doFinal(Base64.getDecoder().decode(p)),StandardCharsets.UTF_8); }
-  private String n(String s){return s==null?"":s;}
 }
