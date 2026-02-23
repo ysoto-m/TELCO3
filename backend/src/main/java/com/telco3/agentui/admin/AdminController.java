@@ -1,5 +1,6 @@
 package com.telco3.agentui.admin;
 
+import com.telco3.agentui.agent.VicidialCredentialService;
 import com.telco3.agentui.domain.Entities;
 import com.telco3.agentui.domain.InteractionRepository;
 import com.telco3.agentui.domain.UserRepository;
@@ -24,13 +25,15 @@ public class AdminController {
   private final UserRepository users;
   private final SettingsController settingsController;
   private final PasswordEncoder encoder;
+  private final VicidialCredentialService credentialService;
 
-  public AdminController(VicidialClient vicidial, InteractionRepository interactions, UserRepository users, SettingsController settingsController, PasswordEncoder encoder) {
+  public AdminController(VicidialClient vicidial, InteractionRepository interactions, UserRepository users, SettingsController settingsController, PasswordEncoder encoder, VicidialCredentialService credentialService) {
     this.vicidial = vicidial;
     this.interactions = interactions;
     this.users = users;
     this.settingsController = settingsController;
     this.encoder = encoder;
+    this.credentialService = credentialService;
   }
 
   @GetMapping("/summary")
@@ -174,6 +177,17 @@ public class AdminController {
     u.role = Entities.Role.valueOf(req.role());
     u.active = req.active() == null || req.active();
     users.save(u);
+    return Map.of("ok", true);
+  }
+
+
+
+  public record AdminAgentPassReq(@NotBlank String agentPass) {}
+
+  @PutMapping("/users/{id}/agent-pass")
+  Map<String, Object> updateAgentPass(@PathVariable Long id, @RequestBody AdminAgentPassReq req) throws Exception {
+    UserEntity u = users.findById(id).orElseThrow();
+    credentialService.updateAgentPass(u.username, req.agentPass());
     return Map.of("ok", true);
   }
 

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: VICIdial Agent UI API
-  version: 1.0.0
+  version: 1.1.0
 servers:
   - url: http://localhost:8080
 components:
@@ -38,6 +38,56 @@ components:
         apiUser: { type: string }
         source: { type: string }
         updatedAt: { type: string, format: date-time }
+    AgentProfileResponse:
+      type: object
+      properties:
+        hasAgentPass: { type: boolean }
+        lastPhoneLogin: { type: string, nullable: true }
+        lastCampaign: { type: string, nullable: true }
+        rememberCredentials: { type: boolean }
+        connected: { type: boolean }
+        connectedPhoneLogin: { type: string, nullable: true }
+        connectedCampaign: { type: string, nullable: true }
+        agentUser: { type: string }
+    AgentPassUpdateRequest:
+      type: object
+      required: [agentPass]
+      properties:
+        agentPass: { type: string }
+    AvailableCampaignsRequest:
+      type: object
+      required: [phoneLogin]
+      properties:
+        phoneLogin: { type: string }
+    AvailableCampaignsResponse:
+      type: object
+      properties:
+        phoneLogin: { type: string }
+        generatedPhonePass: { type: string }
+        campaigns:
+          type: array
+          items: { type: string }
+        raw: { type: string }
+        error: { type: string, nullable: true }
+    VicidialConnectRequest:
+      type: object
+      required: [phoneLogin, campaign]
+      properties:
+        phoneLogin: { type: string }
+        campaign: { type: string }
+        rememberCredentials: { type: boolean, default: true }
+    VicidialStatusResponse:
+      type: object
+      properties:
+        agentUser: { type: string }
+        status: { type: string }
+        campaign: { type: string }
+        extension: { type: string }
+        paused: { type: string }
+        connected: { type: boolean }
+        connectedCampaign: { type: string, nullable: true }
+        connectedPhoneLogin: { type: string, nullable: true }
+        raw: { type: string }
     ActiveLeadResponse:
       type: object
       properties:
@@ -154,6 +204,84 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/VicidialSettingsRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/profile:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentProfileResponse' }
+  /api/agent/profile/agent-pass:
+    put:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentPassUpdateRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/campaigns/available:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AvailableCampaignsRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailableCampaignsResponse' }
+  /api/agent/vicidial/connect:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VicidialConnectRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /api/agent/vicidial/disconnect:
+    post:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/vicidial/status:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VicidialStatusResponse' }
+  /api/admin/users/{id}/agent-pass:
+    put:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentPassUpdateRequest' }
       responses:
         '200':
           content:

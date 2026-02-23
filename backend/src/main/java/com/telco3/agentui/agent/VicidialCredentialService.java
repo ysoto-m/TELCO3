@@ -22,30 +22,94 @@ public class VicidialCredentialService {
     this.key = new SecretKeySpec(cryptoKey.getBytes(StandardCharsets.UTF_8), "AES");
   }
 
-  public void save(String appUsername, String agentUser, String agentPass, String phoneLogin, String phonePass, String campaign) throws Exception {
-    var entity = repo.findByAppUsernameAndAgentUser(appUsername, agentUser).orElse(new AgentVicidialCredentialEntity());
-    entity.appUsername = appUsername;
-    entity.agentUser = agentUser;
+  public AgentProfileState getProfile(String appUsername) {
+    var entity = repo.findByAppUsername(appUsername).orElse(null);
+    if (entity == null) {
+      return new AgentProfileState(false, null, null, true, false, null, null, null, appUsername);
+    }
+    return new AgentProfileState(
+        entity.agentPassEncrypted != null && !entity.agentPassEncrypted.isBlank(),
+        entity.lastPhoneLogin,
+        entity.lastCampaign,
+        entity.rememberCredentials,
+        entity.connected,
+        entity.connectedPhoneLogin,
+        entity.connectedCampaign,
+        entity.connectedAt,
+        entity.agentUser
+    );
+  }
+
+  public void updateAgentPass(String appUsername, String agentPass) throws Exception {
+    var entity = getOrCreate(appUsername);
     entity.agentPassEncrypted = encrypt(agentPass);
-    entity.phoneLogin = phoneLogin;
-    entity.phonePassEncrypted = encrypt(phonePass);
-    entity.campaign = campaign;
     entity.updatedAt = OffsetDateTime.now();
     repo.save(entity);
   }
 
-  public Optional<ResolvedCredential> find(String appUsername, String agentUser) {
-    return repo.findByAppUsernameAndAgentUser(appUsername, agentUser)
+  public Optional<String> resolveAgentPass(String appUsername) {
+    return repo.findByAppUsername(appUsername)
         .map(e -> {
+          if (e.agentPassEncrypted == null || e.agentPassEncrypted.isBlank()) return null;
           try {
-            return new ResolvedCredential(e.agentUser, decrypt(e.agentPassEncrypted), e.phoneLogin, decrypt(e.phonePassEncrypted), e.campaign);
+            return decrypt(e.agentPassEncrypted);
           } catch (Exception ex) {
             throw new RuntimeException(ex);
           }
         });
   }
 
-  public record ResolvedCredential(String agentUser, String agentPass, String phoneLogin, String phonePass, String campaign) {}
+  public void saveLastSelection(String appUsername, String phoneLogin, String campaign, boolean rememberCredentials) {
+    var entity = getOrCreate(appUsername);
+    entity.rememberCredentials = rememberCredentials;
+    if (rememberCredentials) {
+      entity.lastPhoneLogin = phoneLogin;
+      entity.lastCampaign = campaign;
+    }
+    entity.updatedAt = OffsetDateTime.now();
+    repo.save(entity);
+  }
+
+  public void markConnected(String appUsername, String phoneLogin, String campaign) {
+    var entity = getOrCreate(appUsername);
+    entity.connected = true;
+    entity.connectedPhoneLogin = phoneLogin;
+    entity.connectedCampaign = campaign;
+    entity.connectedAt = OffsetDateTime.now();
+    entity.updatedAt = OffsetDateTime.now();
+    repo.save(entity);
+  }
+
+  public void markDisconnected(String appUsername) {
+    var entity = getOrCreate(appUsername);
+    entity.connected = false;
+    entity.connectedPhoneLogin = null;
+    entity.connectedCampaign = null;
+    entity.connectedAt = null;
+    entity.updatedAt = OffsetDateTime.now();
+    repo.save(entity);
+  }
+
+  private AgentVicidialCredentialEntity getOrCreate(String appUsername) {
+    return repo.findByAppUsername(appUsername).orElseGet(() -> {
+      var entity = new AgentVicidialCredentialEntity();
+      entity.appUsername = appUsername;
+      entity.agentUser = appUsername;
+      return entity;
+    });
+  }
+
+  public record AgentProfileState(
+      boolean hasAgentPass,
+      String lastPhoneLogin,
+      String lastCampaign,
+      boolean rememberCredentials,
+      boolean connected,
+      String connectedPhoneLogin,
+      String connectedCampaign,
+      OffsetDateTime connectedAt,
+      String agentUser
+  ) {}
 
   private String encrypt(String value) throws Exception {
     var cipher = Cipher.getInstance("AES");

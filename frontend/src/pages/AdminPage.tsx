@@ -1,6 +1,6 @@
 import { Alert, Box, Button, Card, CardContent, Container, Grid, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { adminAgents, adminCampaigns, adminCreateUser, adminExportCsvUrl, adminInteractions, adminSettings, adminSummary, adminUpdateSettings, adminUsers } from '../api/sdk';
+import { adminAgents, adminCampaigns, adminCreateUser, adminExportCsvUrl, adminInteractions, adminSettings, adminSummary, adminUpdateAgentPass, adminUpdateSettings, adminUsers } from '../api/sdk';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -19,6 +19,8 @@ export default function AdminPage(){
   const updateSettings = useMutation({ mutationFn: adminUpdateSettings, onSuccess: ()=>settings.refetch() });
   const [newUser,setNewUser]=useState({username:'',password:'',role:'AGENT',active:true});
   const [cfg,setCfg]=useState<any>(null);
+  const [agentPassByUser, setAgentPassByUser] = useState<Record<number,string>>({});
+  const updateAgentPass = useMutation({ mutationFn: ({id,agentPass}:{id:number;agentPass:string})=>adminUpdateAgentPass(id,{agentPass}) });
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -64,7 +66,7 @@ export default function AdminPage(){
       <Grid container spacing={2}>
         <Grid item xs={12} md={6}><Card><CardContent><Stack gap={1}><Typography variant='h6'>Usuarios</Typography>
           <Stack direction='row' gap={1}><TextField label='Username' value={newUser.username} onChange={e=>setNewUser({...newUser,username:e.target.value})}/><TextField label='Password' type='password' value={newUser.password} onChange={e=>setNewUser({...newUser,password:e.target.value})}/><TextField label='Role' value={newUser.role} onChange={e=>setNewUser({...newUser,role:e.target.value})}/><Button variant='contained' onClick={()=>createUser.mutate(newUser)}>Crear</Button></Stack>
-          <Table size='small'><TableHead><TableRow><TableCell>User</TableCell><TableCell>Role</TableCell><TableCell>Activo</TableCell></TableRow></TableHead><TableBody>{(users.data||[]).map((u:any)=><TableRow key={u.id}><TableCell>{u.username}</TableCell><TableCell>{u.role}</TableCell><TableCell>{String(u.active)}</TableCell></TableRow>)}</TableBody></Table>
+          <Table size='small'><TableHead><TableRow><TableCell>User</TableCell><TableCell>Role</TableCell><TableCell>Activo</TableCell><TableCell>agent_pass</TableCell></TableRow></TableHead><TableBody>{(users.data||[]).map((u:any)=><TableRow key={u.id}><TableCell>{u.username}</TableCell><TableCell>{u.role}</TableCell><TableCell>{String(u.active)}</TableCell><TableCell><Stack direction='row' gap={1}><TextField size='small' type='password' placeholder='Nuevo agent_pass' value={agentPassByUser[u.id]||''} onChange={e=>setAgentPassByUser({...agentPassByUser,[u.id]:e.target.value})}/><Button size='small' variant='outlined' onClick={()=>updateAgentPass.mutate({id:u.id,agentPass:agentPassByUser[u.id]||''})} disabled={!(agentPassByUser[u.id]||'')}>Guardar</Button></Stack></TableCell></TableRow>)}</TableBody></Table>
         </Stack></CardContent></Card></Grid>
         <Grid item xs={12} md={6}><Card><CardContent><Stack gap={1}><Typography variant='h6'>Settings Vicidial</Typography>
           <TextField label='Base URL' value={(cfg||settings.data||{}).baseUrl||''} onChange={e=>setCfg({...cfg,...settings.data,baseUrl:e.target.value})}/>
