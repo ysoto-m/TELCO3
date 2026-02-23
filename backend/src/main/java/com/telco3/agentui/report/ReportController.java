@@ -1,6 +1,6 @@
 package com.telco3.agentui.report;
 
-import com.telco3.agentui.domain.Repositories.InteractionRepository;
+import com.telco3.agentui.domain.InteractionRepository;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;

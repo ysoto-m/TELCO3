@@ -33,8 +33,25 @@ public class AgentController {
     String data = leadId!=null ? vicidial.leadInfo(leadId) : vicidial.leadSearch(phone==null?"":phone);
     String dni = extract(data,"vendor_lead_code");
     var c = customers.findByDni(dni).orElseGet(()->{var nc=new CustomerEntity(); nc.dni=dni; nc.firstName="TODO"; nc.lastName="TODO"; return nc;});
-    List<Map<String,Object>> ph= c.id==null?List.of():phones.findByCustomerId(c.id).stream().map(p->Map.of("phoneNumber",p.phoneNumber,"isPrimary",p.isPrimary)).toList();
-    var hist=interactions.findTop20ByDniOrderByCreatedAtDesc(dni).stream().map(i->Map.of("id",i.id,"dispo",i.dispo,"notes",Objects.toString(i.notes,""),"createdAt",i.createdAt,"syncStatus",i.syncStatus.name())).toList();
+    List<Map<String,Object>> ph =
+    c.id == null
+        ? List.<Map<String, Object>>of()
+        : phones.findByCustomerId(c.id).stream()
+            .map(p -> Map.<String, Object>of(
+                "phoneNumber", p.phoneNumber,
+                "isPrimary", p.isPrimary
+            ))
+            .toList();
+    var hist =
+    interactions.findTop20ByDniOrderByCreatedAtDesc(dni).stream()
+        .map(i -> Map.<String, Object>of(
+            "id", i.id,
+            "dispo", i.dispo,
+            "notes", Objects.toString(i.notes, ""),
+            "createdAt", i.createdAt,
+            "syncStatus", i.syncStatus.name()
+        ))
+        .toList();
     return Map.of("lead",Map.of("leadId",leadId==null?extractLong(data,"lead_id"):leadId,"phoneNumber",Objects.toString(phone,extract(data,"phone_number")),"campaign",Objects.toString(campaign,extract(data,"campaign_id")),"dni",dni),
       "customer",Map.of("dni",dni,"firstName",Objects.toString(c.firstName,"TODO"),"lastName",Objects.toString(c.lastName,"TODO")),
       "phones",ph,"interactions",hist,"dispoOptions",List.of("SALE","NOANS","CALLBK","DNC"));
