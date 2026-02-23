@@ -8,5 +8,23 @@ export const saveInteraction = (payload:any)=>api.post('/api/agent/interactions'
 export const retryInteraction = (id:number)=>api.post(`/api/agent/interactions/${id}/retry-vicidial`).then(r=>r.data);
 export const previewAction = (payload:any)=>api.post('/api/agent/preview-action',payload).then(r=>r.data);
 export const pauseAction = (payload:any)=>api.post('/api/agent/pause',payload).then(r=>r.data);
+export const agentLoginToVicidial = (payload:any)=>api.post('/api/agent/login-to-vicidial',payload).then(r=>r.data);
+export const agentLogoutFromVicidial = (payload:any)=>api.post('/api/agent/logout-from-vicidial',payload).then(r=>r.data);
+export const agentStatus = (agentUser:string)=>api.get('/api/agent/status',{params:{agentUser}}).then(r=>r.data);
+export const agentCampaigns = (agentUser:string)=>api.get('/api/agent/campaigns',{params:{agentUser}}).then(r=>r.data);
 export const importCsv = (file:File)=>{const f=new FormData();f.append('file',file);return api.post('/api/vicidial/leads/import',f).then(r=>r.data)};
 export const reportSummary=(p:any)=>api.get('/api/reports/summary',{params:p}).then(r=>r.data);
+
+export const adminSummary = ()=>api.get('/api/admin/summary').then(r=>r.data);
+export const adminAgents = ()=>api.get('/api/admin/agents').then(r=>r.data);
+export const adminCampaigns = ()=>api.get('/api/admin/campaigns').then(r=>r.data);
+export const adminInteractions = (params:any)=>api.get('/api/admin/interactions',{params}).then(r=>r.data);
+export const adminExportCsvUrl = (params:any)=> {
+  const query = new URLSearchParams(params).toString();
+  return `${api.defaults.baseURL}/api/admin/interactions/export.csv?${query}`;
+};
+export const adminUsers = ()=>api.get('/api/admin/users').then(r=>r.data);
+export const adminCreateUser = (payload:any)=>api.post('/api/admin/users',payload).then(r=>r.data);
+export const adminUpdateUser = (id:number,payload:any)=>api.put(`/api/admin/users/${id}`,payload).then(r=>r.data);
+export const adminSettings = ()=>api.get('/api/admin/settings').then(r=>r.data);
+export const adminUpdateSettings = (payload:any)=>api.put('/api/admin/settings',payload).then(r=>r.data);

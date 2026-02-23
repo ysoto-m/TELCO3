@@ -62,4 +62,16 @@ public class Entities {
     @Column(columnDefinition="text") public String lastError;
     public OffsetDateTime createdAt = OffsetDateTime.now();
   }
+
+  @Entity @Table(name="agent_vicidial_credentials")
+  public static class AgentVicidialCredentialEntity {
+    @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;
+    @Column(nullable = false) public String appUsername;
+    @Column(nullable = false) public String agentUser;
+    @Column(nullable = false, columnDefinition = "text") public String agentPassEncrypted;
+    @Column(nullable = false) public String phoneLogin;
+    @Column(nullable = false, columnDefinition = "text") public String phonePassEncrypted;
+    public String campaign;
+    public OffsetDateTime updatedAt = OffsetDateTime.now();
+  }
 }
