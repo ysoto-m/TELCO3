@@ -30,11 +30,16 @@ public class VicidialSessionClient {
     var settings = settingsController.current();
     String baseUrl = normalizeBaseUrl(settings.baseUrl);
 
-    CookieManager cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
-    HttpClient client = HttpClient.newBuilder()
-        .cookieHandler(cookieManager)
-        .connectTimeout(Duration.ofSeconds(8))
-        .build();
+    SessionContext existing = sessionByAgent.get(agentUser);
+    CookieManager cookieManager = existing == null
+        ? new CookieManager(null, CookiePolicy.ACCEPT_ALL)
+        : existing.cookieManager();
+    HttpClient client = existing == null
+        ? HttpClient.newBuilder()
+            .cookieHandler(cookieManager)
+            .connectTimeout(Duration.ofSeconds(8))
+            .build()
+        : existing.client();
 
     Map<String, String> form = new LinkedHashMap<>();
     form.put("DB", "0");
@@ -59,7 +64,7 @@ public class VicidialSessionClient {
           .build();
 
       HttpResponse<String> response = client.send(req, HttpResponse.BodyHandlers.ofString());
-      sessionByAgent.put(agentUser, new SessionContext(client, cookieManager));
+      sessionByAgent.putIfAbsent(agentUser, new SessionContext(client, cookieManager));
       return "HTTP=" + response.statusCode() + " BODY=" + response.body();
     } catch (Exception e) {
       throw new RuntimeException("Error conectando phone en AGC: " + e.getMessage(), e);
