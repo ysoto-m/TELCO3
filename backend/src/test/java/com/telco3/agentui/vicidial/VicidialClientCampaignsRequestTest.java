@@ -20,6 +20,8 @@ class VicidialClientCampaignsRequestTest {
 
   private HttpServer server;
   private URI receivedUri;
+  private String receivedMethod;
+  private String receivedBody;
 
   @AfterEach
   void tearDown() {
@@ -29,11 +31,13 @@ class VicidialClientCampaignsRequestTest {
   }
 
   @Test
-  void campaignsForAgentUsesRealAgentCredentialsAndPhoneData() throws IOException {
+  void campaignsForAgentUsesVdcDbQueryLoginCampaignsFlow() throws IOException {
     server = HttpServer.create(new InetSocketAddress(0), 0);
-    server.createContext("/agc/api.php", exchange -> {
+    server.createContext("/agc/vdc_db_query.php", exchange -> {
       receivedUri = exchange.getRequestURI();
-      byte[] body = "campaign_id=CL_TEST".getBytes(StandardCharsets.UTF_8);
+      receivedMethod = exchange.getRequestMethod();
+      receivedBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+      byte[] body = "<select><option value=\"CL_TEST\">Test Campaign</option></select>".getBytes(StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(200, body.length);
       exchange.getResponseBody().write(body);
       exchange.close();
@@ -50,15 +54,16 @@ class VicidialClientCampaignsRequestTest {
         "test"
     ));
 
-    VicidialClient client = new VicidialClient(configService);
-    var result = client.campaignsForAgent("48373608", "agentPass123", "1001", "anexo_1001");
+    VicidialClient client = new VicidialClient(configService, 2000, 4000);
+    var result = client.campaignsForAgent("48373608", "agentPass123");
 
-    Map<String, String> query = parseQuery(receivedUri.getRawQuery());
-    assertEquals("48373608", query.get("user"));
-    assertEquals("agentPass123", query.get("pass"));
-    assertEquals("48373608", query.get("agent_user"));
-    assertEquals("1001", query.get("phone_login"));
-    assertEquals("anexo_1001", query.get("phone_pass"));
+    Map<String, String> form = parseQuery(receivedBody);
+    assertEquals("POST", receivedMethod);
+    assertEquals("/agc/vdc_db_query.php", receivedUri.getPath());
+    assertEquals("48373608", form.get("user"));
+    assertEquals("agentPass123", form.get("pass"));
+    assertEquals("LogiNCamPaigns", form.get("ACTION"));
+    assertEquals("html", form.get("format"));
     assertEquals(200, result.statusCode());
     assertTrue(result.body().contains("CL_TEST"));
   }

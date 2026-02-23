@@ -1,12 +1,16 @@
 package com.telco3.agentui.vicidial;
 
 import org.springframework.http.MediaType;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 import reactor.core.Exceptions;
 
 import java.time.Duration;
+import java.net.ConnectException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -16,25 +20,23 @@ import java.util.concurrent.TimeoutException;
 @Component
 public class VicidialClient {
   private final VicidialConfigService configService;
+  private final Duration connectTimeout;
+  private final Duration readTimeout;
 
-  public VicidialClient(VicidialConfigService configService) {
+  public VicidialClient(
+      VicidialConfigService configService,
+      @Value("${vicidial.http.connect-timeout-ms:4000}") long connectTimeoutMs,
+      @Value("${vicidial.http.read-timeout-ms:12000}") long readTimeoutMs
+  ) {
     this.configService = configService;
+    this.connectTimeout = Duration.ofMillis(connectTimeoutMs);
+    this.readTimeout = Duration.ofMillis(readTimeoutMs);
   }
 
   private VicidialHttpResult call(String path, Map<String, String> params) {
     var s = configService.resolve();
     params.put("user", s.apiUser());
     params.put("pass", s.apiPass());
-    if (StringUtils.hasText(s.source())) {
-      params.put("source", s.source());
-    }
-    return executeGet(s.baseUrl(), path, params);
-  }
-
-  private VicidialHttpResult call(String path, Map<String, String> params, String user, String pass) {
-    var s = configService.resolve();
-    params.put("user", user);
-    params.put("pass", pass);
     if (StringUtils.hasText(s.source())) {
       params.put("source", s.source());
     }
@@ -53,7 +55,7 @@ public class VicidialClient {
 
   private VicidialHttpResult executeGet(String baseUrl, String path, Map<String, String> params) {
     try {
-      return WebClient.create(baseUrl)
+      return client(baseUrl)
           .get()
           .uri(u -> {
             var b = u.path(path);
@@ -61,7 +63,7 @@ public class VicidialClient {
             return b.build();
           })
           .exchangeToMono(resp -> resp.bodyToMono(String.class).defaultIfEmpty("").map(body -> new VicidialHttpResult(resp.statusCode().value(), body)))
-          .timeout(Duration.ofSeconds(12))
+          .timeout(readTimeout)
           .blockOptional()
           .orElse(new VicidialHttpResult(0, ""));
     } catch (Exception ex) {
@@ -71,18 +73,28 @@ public class VicidialClient {
 
   private VicidialHttpResult executePost(String baseUrl, String path, Map<String, String> params) {
     try {
-      return WebClient.create(baseUrl)
+      return client(baseUrl)
           .post()
           .uri(path)
           .contentType(MediaType.APPLICATION_FORM_URLENCODED)
           .bodyValue(toForm(params))
           .exchangeToMono(resp -> resp.bodyToMono(String.class).defaultIfEmpty("").map(body -> new VicidialHttpResult(resp.statusCode().value(), body)))
-          .timeout(Duration.ofSeconds(12))
+          .timeout(readTimeout)
           .blockOptional()
           .orElse(new VicidialHttpResult(0, ""));
     } catch (Exception ex) {
       throw mapClientException(ex);
     }
+  }
+
+  private WebClient client(String baseUrl) {
+    var httpClient = HttpClient.create()
+        .option(io.netty.channel.ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(connectTimeout.toMillis()))
+        .responseTimeout(readTimeout);
+    return WebClient.builder()
+        .baseUrl(baseUrl)
+        .clientConnector(new ReactorClientHttpConnector(httpClient))
+        .build();
   }
 
   private RuntimeException mapClientException(Exception ex) {
@@ -93,6 +105,13 @@ public class VicidialClient {
           "Vicidial no respondió dentro del tiempo esperado.",
           "Verifique conectividad a VICIDIAL_BASE_URL y estado del servidor AGC/API.",
           Map.of("cause", "TimeoutException"));
+    }
+    if (root instanceof ConnectException || root instanceof java.net.UnknownHostException) {
+      return new VicidialServiceException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+          "VICIDIAL_UNREACHABLE",
+          "No fue posible conectar con Vicidial.",
+          "Revise VICIDIAL_BASE_URL, DNS/ruta de red y disponibilidad del servidor.",
+          Map.of("cause", root.getClass().getSimpleName()));
     }
     return new RuntimeException(root.getMessage(), root);
   }
@@ -159,13 +178,14 @@ public class VicidialClient {
     return call("/agc/api.php", new HashMap<>(Map.of("function", "live_agents"))).body();
   }
 
-  public VicidialHttpResult campaignsForAgent(String agentUser, String agentPass, String phoneLogin, String phonePass) {
+  public VicidialHttpResult campaignsForAgent(String agentUser, String agentPass) {
+    var s = configService.resolve();
     var params = new HashMap<String, String>();
-    params.put("function", "campaign_status");
-    params.put("agent_user", agentUser);
-    params.put("phone_login", phoneLogin);
-    params.put("phone_pass", phonePass);
-    return call("/agc/api.php", params, agentUser, agentPass);
+    params.put("user", agentUser);
+    params.put("pass", agentPass);
+    params.put("ACTION", "LogiNCamPaigns");
+    params.put("format", "html");
+    return executePost(s.baseUrl(), "/agc/vdc_db_query.php", params);
   }
 
   public String campaigns() {

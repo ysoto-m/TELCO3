@@ -1,6 +1,7 @@
 package com.telco3.agentui.agent;
 
 import com.telco3.agentui.vicidial.VicidialClient;
+import com.telco3.agentui.vicidial.VicidialCampaignParser;
 import com.telco3.agentui.vicidial.VicidialDiagnosticsService;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialSessionClient;
@@ -20,14 +21,16 @@ public class AgentVicidialSessionService {
   private final VicidialSessionClient sessionClient;
   private final VicidialClient vicidialClient;
   private final VicidialCredentialService credentialService;
+  private final VicidialCampaignParser campaignParser;
   private final VicidialDiagnosticsService diagnosticsService;
   private final Environment environment;
   private final Map<String, AgentVicidialState> stateByAgent = new ConcurrentHashMap<>();
 
-  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService, VicidialDiagnosticsService diagnosticsService, Environment environment) {
+  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService, VicidialCampaignParser campaignParser, VicidialDiagnosticsService diagnosticsService, Environment environment) {
     this.sessionClient = sessionClient;
     this.vicidialClient = vicidialClient;
     this.credentialService = credentialService;
+    this.campaignParser = campaignParser;
     this.diagnosticsService = diagnosticsService;
     this.environment = environment;
   }
@@ -74,20 +77,34 @@ public class AgentVicidialSessionService {
       );
     }
 
-    String phonePass = buildPhonePass(state.phoneLogin);
-    var result = vicidialClient.campaignsForAgent(credentials.agentUser(), credentials.agentPass(), state.phoneLogin, phonePass);
-    debugCampaignCall(credentials.agentUser(), state.phoneLogin, result.statusCode(), result.snippet(), credentials.fallbackUsed());
+    long startedAt = System.nanoTime();
+    var result = vicidialClient.campaignsForAgent(credentials.agentUser(), credentials.agentPass());
+    long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+    debugCampaignCall(credentials.agentUser(), result.statusCode(), elapsedMs, result.snippet(), credentials.fallbackUsed());
 
-    List<String> campaigns = parseCampaigns(result.body());
-    if (campaigns.isEmpty()) {
+    if (result.body().contains("ERROR: Invalid Username/Password")) {
+      throw new VicidialServiceException(
+          HttpStatus.BAD_REQUEST,
+          "VICIDIAL_INVALID_CREDENTIALS",
+          "Vicidial rechazó user/pass del agente para listar campañas.",
+          "Verifique usuario y clave del agente en Vicidial (sin usar phone_login/phone_pass para este flujo).",
+          Map.of(
+              "agentUser", mask(credentials.agentUser()),
+              "statusCode", result.statusCode(),
+              "rawSnippet", result.snippet()
+          )
+      );
+    }
+
+    List<VicidialCampaignParser.CampaignOption> campaignOptions = campaignParser.parseCampaignOptions(result.body());
+    if (campaignOptions.isEmpty()) {
       throw new VicidialServiceException(
           HttpStatus.BAD_REQUEST,
           "VICIDIAL_EMPTY_CAMPAIGNS",
-          "Vicidial respondió sin campañas para el agente autenticado.",
-          "Verifique user/agent_pass del agente, phone_login conectado y permisos de campaña en Vicidial.",
+          "Vicidial respondió sin opciones de campaña en ACTION=LogiNCamPaigns.",
+          "Revise permisos de campañas del agente (user_group/user_level) o parámetros enviados (ACTION/format).",
           Map.of(
               "agentUser", mask(credentials.agentUser()),
-              "phoneLogin", state.phoneLogin,
               "statusCode", result.statusCode(),
               "rawSnippet", result.snippet()
           )
@@ -96,7 +113,8 @@ public class AgentVicidialSessionService {
 
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("phoneLogin", state.phoneLogin);
-    response.put("campaigns", campaigns);
+    response.put("campaigns", campaignOptions.stream().map(VicidialCampaignParser.CampaignOption::value).toList());
+    response.put("campaignOptions", campaignOptions);
     response.put("raw", result.body());
     if (credentials.fallbackUsed()) {
       response.put("warning", credentials.warning());
@@ -161,26 +179,15 @@ public class AgentVicidialSessionService {
     return normalized.contains("SUCCESS") || normalized.contains("LOGGED") || normalized.contains("200");
   }
 
-  private List<String> parseCampaigns(String raw) {
-    if (raw == null || raw.isBlank()) return List.of();
-    var campaigns = new LinkedHashSet<String>();
-    var matcher = java.util.regex.Pattern.compile("campaign(?:_id)?=([^&\\s]+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(raw);
-    while (matcher.find()) campaigns.add(matcher.group(1));
-    if (campaigns.isEmpty()) {
-      raw.lines().map(String::trim).filter(line -> !line.isBlank()).forEach(campaigns::add);
-    }
-    return campaigns.stream().limit(200).toList();
-  }
-
-  private void debugCampaignCall(String agentUser, String phoneLogin, int statusCode, String snippet, boolean fallbackUsed) {
+  private void debugCampaignCall(String agentUser, int statusCode, long durationMs, String snippet, boolean fallbackUsed) {
     if (!isDevEnvironment()) {
       return;
     }
     log.info(
-        "Vicidial campaigns debug endpoint=/agc/api.php function=campaign_status agentUser={} phone_login={} status={} snippet={} fallbackUsed={}",
+        "Vicidial campaigns debug endpoint=/agc/vdc_db_query.php action=LogiNCamPaigns format=html agentUser={} status={} durationMs={} snippet={} fallbackUsed={}",
         mask(agentUser),
-        phoneLogin,
         statusCode,
+        durationMs,
         snippet,
         fallbackUsed
     );
@@ -194,8 +201,8 @@ public class AgentVicidialSessionService {
 
   private String mask(String value) {
     if (value == null || value.isBlank()) return "***";
-    if (value.length() <= 2) return "**";
-    return value.substring(0, 2) + "***" + value.substring(value.length() - 1);
+    if (value.length() <= 4) return "****";
+    return value.substring(0, 4) + "****";
   }
 
   static class AgentVicidialState {
