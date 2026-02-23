@@ -83,14 +83,14 @@ public class AgentVicidialSessionService {
 
   public Map<String, Object> status(String agentUser) {
     AgentVicidialState state = stateByAgent.get(agentUser);
-    return Map.of(
-        "agentUser", agentUser,
-        "phoneConnected", state != null && state.phoneConnected,
-        "phoneLogin", state == null ? null : state.phoneLogin,
-        "campaign", state == null ? null : state.campaign,
-        "mode", state == null ? null : state.mode,
-        "typingEnabled", state != null && state.phoneConnected && state.campaign != null
-    );
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("agentUser", agentUser);
+    response.put("phoneConnected", state != null && state.phoneConnected);
+    response.put("phoneLogin", state == null ? null : state.phoneLogin);
+    response.put("campaign", state == null ? null : state.campaign);
+    response.put("mode", state == null ? null : state.mode);
+    response.put("typingEnabled", state != null && state.phoneConnected && state.campaign != null);
+    return response;
   }
 
   private AgentVicidialState requirePhoneConnected(String agentUser) {
