@@ -76,6 +76,12 @@ public class SecurityConfig {
     private final JwtService jwt;
     public JwtFilter(JwtService jwt){this.jwt=jwt;}
     @Override protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain) throws ServletException, IOException {
+      String path = req.getRequestURI();
+      if (HttpMethod.OPTIONS.matches(req.getMethod()) || path.startsWith("/api/auth/")) {
+        chain.doFilter(req, res);
+        return;
+      }
+
       String h=req.getHeader(HttpHeaders.AUTHORIZATION);
       if(h!=null && h.startsWith("Bearer ")){
         try {

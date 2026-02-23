@@ -1,22 +1,45 @@
 import { Alert, Button, Card, CardContent, Container, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { agentCampaigns, agentLoginToVicidial, agentLogoutFromVicidial, agentStatus, getActiveLead, getContext, pauseAction, previewAction, retryInteraction, saveInteraction } from '../api/sdk';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
 
 export default function AgentPage(){
- const [sp]=useSearchParams(); const agentUser=sp.get('agent_user')||''; const mode=sp.get('mode')||'predictive'; const [dispo,setDispo]=useState(''); const [notes,setNotes]=useState('');
- const [phoneLogin,setPhoneLogin]=useState(''); const [phonePass,setPhonePass]=useState(''); const [agentPass,setAgentPass]=useState(''); const [campaign,setCampaign]=useState(''); const [remember,setRemember]=useState(true);
+ const [sp]=useSearchParams();
+ const navigate = useNavigate();
+ const agentUser=sp.get('agent_user')||'';
+ const mode=sp.get('mode')||'predictive';
+ const [dispo,setDispo]=useState('');
+ const [notes,setNotes]=useState('');
+ const [phoneLogin,setPhoneLogin]=useState('');
+ const [phonePass,setPhonePass]=useState('');
+ const [agentPass,setAgentPass]=useState('');
+ const [campaign,setCampaign]=useState('');
+ const [remember,setRemember]=useState(true);
+
+ const logout = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('role');
+  sessionStorage.clear();
+  navigate('/login', { replace: true });
+ };
+
  const active=useQuery({queryKey:['a',agentUser],queryFn:()=>getActiveLead(agentUser),enabled:!sp.get('lead_id')&&!!agentUser});
  const leadId=Number(sp.get('lead_id')||active.data?.leadId||0)||undefined;
  const context=useQuery({queryKey:['c',agentUser,leadId],queryFn:()=>getContext({agentUser,leadId,phone:sp.get('phone_number')||undefined,campaign:sp.get('campaign')||undefined,mode}),enabled:!!agentUser});
  const status=useQuery({queryKey:['status',agentUser],queryFn:()=>agentStatus(agentUser),enabled:!!agentUser,refetchInterval:10000});
  const campaigns=useQuery({queryKey:['campaigns',agentUser],queryFn:()=>agentCampaigns(agentUser),enabled:!!agentUser});
- const connect=useMutation({mutationFn:agentLoginToVicidial}); const disconnect=useMutation({mutationFn:agentLogoutFromVicidial});
- const save=useMutation({mutationFn:saveInteraction}); const retry=useMutation({mutationFn:retryInteraction});
+ const connect=useMutation({mutationFn:agentLoginToVicidial});
+ const disconnect=useMutation({mutationFn:agentLogoutFromVicidial});
+ const save=useMutation({mutationFn:saveInteraction});
+ const retry=useMutation({mutationFn:retryInteraction});
  const c:any=context.data;
+
  return <Container sx={{py:3}}><Stack gap={2}>
-  <Typography variant='h5'>Atención {mode}</Typography>
+  <Stack direction='row' justifyContent='space-between' alignItems='center'>
+    <Typography variant='h5'>Atención {mode}</Typography>
+    <Button variant='outlined' color='inherit' onClick={logout}>Cerrar sesión</Button>
+  </Stack>
   <Card><CardContent><Stack gap={1}><Typography variant='h6'>Conexión Vicidial</Typography>
     {status.data?.raw && <Typography variant='body2'>Estado actual: {status.data.status||'N/D'} / Campaña {status.data.campaign||'-'}</Typography>}
     {campaigns.data?.limitation && <Alert severity='info'>{campaigns.data.limitation}</Alert>}
