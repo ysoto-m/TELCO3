@@ -183,6 +183,12 @@ public class VicidialClient {
     return call("/agc/api.php", new HashMap<>(Map.of("function", "st_get_agent_active_lead", "agent_user", agent))).body();
   }
 
+  public ActiveLeadResult activeLeadSafe(String agentUser) {
+    VicidialHttpResult response = call("/agc/api.php", new HashMap<>(Map.of("function", "st_get_agent_active_lead", "agent_user", agentUser)));
+    String body = Objects.toString(response.body(), "");
+    return new ActiveLeadResult(evaluateActiveLeadBody(body), body, response.statusCode());
+  }
+
   public String leadSearch(String phone) {
     return call("/vicidial/non_agent_api.php", new HashMap<>(Map.of("function", "lead_search", "phone_number", phone))).body();
   }
@@ -274,10 +280,12 @@ public class VicidialClient {
     Map<String, Object> details = new LinkedHashMap<>();
     details.put("httpStatus", result.statusCode());
     details.put("classification", classification);
-    if (StringUtils.hasText(errorTextSnippet)) {
+    if (vicidialDebug && StringUtils.hasText(errorTextSnippet)) {
       details.put("errorTextSnippet", errorTextSnippet);
     }
-    details.put("rawSnippet", result.snippet(vicidialDebug ? 600 : 400));
+    if (vicidialDebug) {
+      details.put("rawSnippet", result.snippet(600));
+    }
     if (vicidialDebug) {
       details.put("debugRequest", buildDebugRequest(s.baseUrl(), params));
     }
@@ -302,6 +310,13 @@ public class VicidialClient {
           "La campaña no está asignada o disponible para el agente en Vicidial.",
           "Valide que el agente tenga acceso a la campaña y que esté habilitada.",
           details);
+    }
+    if (outcome == ConnectOutcome.NO_LEADS) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_NO_LEADS",
+          "La campaña no tiene leads disponibles (hopper vacío).",
+          "Cargue base/leads en la campaña o verifique listas/filtros activos en Vicidial.",
+          Map.of("campaignId", campaignId, "httpStatus", result.statusCode()));
     }
     if (outcome == ConnectOutcome.GENERIC_ERROR) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
@@ -400,6 +415,9 @@ public class VicidialClient {
     if (containsCampaignNotAssigned(normalized)) {
       return ConnectOutcome.CAMPAIGN_NOT_ASSIGNED;
     }
+    if (containsNoLeadsInHopper(normalized)) {
+      return ConnectOutcome.NO_LEADS;
+    }
     if (containsLoginForm(body)) {
       return ConnectOutcome.STILL_LOGIN_PAGE;
     }
@@ -410,6 +428,28 @@ public class VicidialClient {
       return ConnectOutcome.GENERIC_ERROR;
     }
     return ConnectOutcome.UNKNOWN;
+  }
+
+  ActiveLeadOutcome evaluateActiveLeadBody(String body) {
+    String normalized = normalize(body);
+    if (containsLoginForm(body)) {
+      return ActiveLeadOutcome.RELOGIN_REQUIRED;
+    }
+    if (normalized.contains("no active lead")
+        || normalized.contains("there are no leads in the hopper")
+        || normalized.contains("no leads in the hopper")
+        || normalized.contains("no lead")) {
+      return ActiveLeadOutcome.NO_ACTIVE_LEAD;
+    }
+    if (normalized.contains("lead_id=")) {
+      return ActiveLeadOutcome.SUCCESS;
+    }
+    return ActiveLeadOutcome.UNKNOWN;
+  }
+
+  private boolean containsNoLeadsInHopper(String normalizedBody) {
+    return normalizedBody.contains("no leads in the hopper")
+        || normalizedBody.contains("there are no leads in the hopper for this campaign");
   }
 
   private boolean containsPhoneInvalid(String normalizedBody) {
@@ -619,10 +659,20 @@ public class VicidialClient {
     INVALID_CREDENTIALS,
     PHONE_INVALID,
     CAMPAIGN_NOT_ASSIGNED,
+    NO_LEADS,
     STILL_LOGIN_PAGE,
     GENERIC_ERROR,
     UNKNOWN
   }
+
+  public enum ActiveLeadOutcome {
+    SUCCESS,
+    NO_ACTIVE_LEAD,
+    RELOGIN_REQUIRED,
+    UNKNOWN
+  }
+
+  public record ActiveLeadResult(ActiveLeadOutcome outcome, String rawBody, int httpStatus) {}
 
   private record CookieSession(CookieStore cookieStore, Instant expiresAt) {
   }

@@ -38,3 +38,35 @@ Esto permite conservar sesión AGC entre requests del mismo agente y seguir redi
 - Señales de éxito HTML: `LOGOUT`, `Logout`, `AGENT_`, `vicidial.php?relogin`, `SESSION_name`
 - Timeout/conectividad => `VICIDIAL_UNREACHABLE`
 - HTTP 4xx/5xx => `VICIDIAL_HTTP_ERROR`
+
+## Clasificación hopper vacío (sin leads)
+
+Si el HTML de `/agc/vicidial.php` contiene (case-insensitive):
+
+- `no leads in the hopper`
+- `there are no leads in the hopper for this campaign`
+
+el backend responde:
+
+```json
+{
+  "ok": false,
+  "code": "VICIDIAL_NO_LEADS",
+  "message": "La campaña no tiene leads disponibles (hopper vacío).",
+  "hint": "Cargue base/leads en la campaña o verifique listas/filtros activos en Vicidial.",
+  "details": {
+    "campaignId": "...",
+    "httpStatus": 200
+  }
+}
+```
+
+> Front contract: cuando UI reciba `VICIDIAL_NO_LEADS`, debe mostrar mensaje funcional al agente y **no** reintentar automáticamente.
+
+`NO_LEADS` se clasifica antes de `STILL_LOGIN_PAGE` para no confundir hopper vacío con re-login.
+
+## Levante rápido en desarrollo
+
+```bash
+mvn -Dmaven.test.skip=true spring-boot:run
+```
