@@ -135,7 +135,8 @@ public class AgentVicidialSessionService {
         ));
 
     long startedAt = System.nanoTime();
-    var result = vicidialClient.connectCampaign(agentUser, agentPass, state.phoneLogin, campaignId);
+    String phonePass = buildPhonePass(state.phoneLogin);
+    var result = vicidialClient.connectToCampaign(agentUser, agentPass, state.phoneLogin, phonePass, campaignId, null, null);
     long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
     debugConnectCall(agentUser, state.phoneLogin, campaignId, result.statusCode(), elapsedMs, result.snippet());
 
@@ -147,6 +148,7 @@ public class AgentVicidialSessionService {
     return Map.of(
         "ok", true,
         "campaign", campaignId,
+        "campaignId", campaignId,
         "mode", mode,
         "phoneLogin", state.phoneLogin,
         "raw", result.body()

@@ -42,12 +42,14 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 @Component
 public class VicidialClient {
   private final VicidialConfigService configService;
   private final Duration connectTimeout;
   private final Duration readTimeout;
+  private final Duration writeTimeout;
   private final Duration cookieTtl;
   private final ConcurrentHashMap<String, CookieSession> cookieSessions = new ConcurrentHashMap<>();
 
@@ -55,12 +57,13 @@ public class VicidialClient {
       VicidialConfigService configService,
       @Value("${vicidial.http.connect-timeout-ms:4000}") long connectTimeoutMs,
       @Value("${vicidial.http.read-timeout-ms:12000}") long readTimeoutMs,
-      @Value("${vicidial.session.cookie-ttl-minutes:30}") long cookieTtlMinutes
+      @Value("${vicidial.http.write-timeout-ms:12000}") long writeTimeoutMs
   ) {
     this.configService = configService;
     this.connectTimeout = Duration.ofMillis(connectTimeoutMs);
     this.readTimeout = Duration.ofMillis(readTimeoutMs);
-    this.cookieTtl = Duration.ofMinutes(cookieTtlMinutes);
+    this.writeTimeout = Duration.ofMillis(writeTimeoutMs);
+    this.cookieTtl = Duration.ofMinutes(30);
   }
 
   private VicidialHttpResult call(String path, Map<String, String> params) {
@@ -223,6 +226,18 @@ public class VicidialClient {
   }
 
   public VicidialHttpResult connectCampaign(String agentUser, String agentPass, String phoneLogin, String campaignId) {
+    return connectToCampaign(agentUser, agentPass, phoneLogin, "anexo_" + phoneLogin, campaignId, null, null);
+  }
+
+  public VicidialHttpResult connectToCampaign(
+      String agentUser,
+      String agentPass,
+      String phoneLogin,
+      String phonePass,
+      String campaignId,
+      Integer browserWidth,
+      Integer browserHeight
+  ) {
     var s = configService.resolve();
     if (!StringUtils.hasText(s.baseUrl())) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
@@ -230,7 +245,7 @@ public class VicidialClient {
           "No hay baseUrl de Vicidial configurada para conectar campaña.");
     }
 
-    var params = buildCampaignConnectParams(agentUser, agentPass, phoneLogin, campaignId);
+    var params = buildCampaignConnectParams(agentUser, agentPass, phoneLogin, phonePass, campaignId, browserWidth, browserHeight);
     VicidialHttpResult result = executePostWithCookies(s.baseUrl(), "/agc/vicidial.php", params, agentUser);
 
     if (result.statusCode() >= 400) {
@@ -242,37 +257,60 @@ public class VicidialClient {
     }
 
     String body = Objects.toString(result.body(), "");
-    if (containsInvalidCredentials(body)) {
+    ConnectOutcome outcome = evaluateCampaignConnectBody(body);
+    if (outcome == ConnectOutcome.INVALID_CREDENTIALS) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_INVALID_CREDENTIALS",
           "Vicidial rechazó las credenciales del agente para conectar campaña.",
           "Revise agent_user/agent_pass en Vicidial.",
           Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet()));
     }
-    if (containsAnyError(body)) {
+    if (outcome == ConnectOutcome.PHONE_INVALID) {
+      throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
+          "VICIDIAL_PHONE_INVALID",
+          "Vicidial rechazó el anexo o clave de teléfono del agente.",
+          "Revise phone_login/phone_pass y estado del phone en Vicidial.",
+          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400)));
+    }
+    if (outcome == ConnectOutcome.CAMPAIGN_NOT_ASSIGNED) {
+      throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
+          "VICIDIAL_CAMPAIGN_NOT_ASSIGNED",
+          "La campaña no está asignada o disponible para el agente en Vicidial.",
+          "Valide que el agente tenga acceso a la campaña y que esté habilitada.",
+          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400)));
+    }
+    if (outcome == ConnectOutcome.GENERIC_ERROR) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
           "Vicidial devolvió un error al conectar campaña.",
           "Revise permisos del user en Vicidial, campaña asignada y phone_login válido.",
-          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet()));
+          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400)));
     }
-    if (!hasConnectSuccessSignals(body)) {
+    if (outcome != ConnectOutcome.SUCCESS) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
           "No fue posible confirmar conexión de campaña en Vicidial.",
           "Revise permisos del user en Vicidial, campaña asignada, phone_login válido y respuesta HTML AGC.",
-          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet()));
+          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400), "hint", "Vicidial devolvió HTML no concluyente o pantalla de login."));
     }
     return result;
   }
 
-  Map<String, String> buildCampaignConnectParams(String agentUser, String agentPass, String phoneLogin, String campaignId) {
+  Map<String, String> buildCampaignConnectParams(
+      String agentUser,
+      String agentPass,
+      String phoneLogin,
+      String phonePass,
+      String campaignId,
+      Integer browserWidth,
+      Integer browserHeight
+  ) {
     var params = new LinkedHashMap<String, String>();
     params.put("DB", "0");
-    params.put("JS_browser_height", "641");
-    params.put("JS_browser_width", "695");
+    params.put("JS_browser_height", String.valueOf(browserHeight == null || browserHeight <= 0 ? 641 : browserHeight));
+    params.put("JS_browser_width", String.valueOf(browserWidth == null || browserWidth <= 0 ? 695 : browserWidth));
     params.put("phone_login", phoneLogin);
-    params.put("phone_pass", "anexo_" + phoneLogin);
+    params.put("phone_pass", phonePass);
     params.put("LOGINvarONE", "");
     params.put("LOGINvarTWO", "");
     params.put("LOGINvarTHREE", "");
@@ -286,7 +324,11 @@ public class VicidialClient {
   }
 
   boolean containsInvalidCredentials(String body) {
-    return Objects.toString(body, "").contains("ERROR: Invalid Username/Password");
+    String text = normalize(body);
+    return text.contains("login incorrect")
+        || text.contains("error: invalid username/password")
+        || text.contains("invalid username/password")
+        || text.contains("invalid password");
   }
 
   boolean hasConnectSuccessSignals(String body) {
@@ -302,10 +344,59 @@ public class VicidialClient {
     return Objects.toString(body, "").contains("ERROR:");
   }
 
+  boolean containsLoginForm(String body) {
+    String text = Objects.toString(body, "").toLowerCase();
+    return text.contains("name=\"vd_login\"")
+        && text.contains("name=\"vd_pass\"");
+  }
+
+  ConnectOutcome evaluateCampaignConnectBody(String body) {
+    String normalized = normalize(body);
+    if (containsInvalidCredentials(normalized)) {
+      return ConnectOutcome.INVALID_CREDENTIALS;
+    }
+    if (containsPhoneInvalid(normalized)) {
+      return ConnectOutcome.PHONE_INVALID;
+    }
+    if (containsCampaignNotAssigned(normalized)) {
+      return ConnectOutcome.CAMPAIGN_NOT_ASSIGNED;
+    }
+    if (containsLoginForm(body)) {
+      return ConnectOutcome.LOGIN_PAGE;
+    }
+    if (hasConnectSuccessSignals(body)) {
+      return ConnectOutcome.SUCCESS;
+    }
+    if (containsAnyError(body)) {
+      return ConnectOutcome.GENERIC_ERROR;
+    }
+    return ConnectOutcome.UNKNOWN;
+  }
+
+  private boolean containsPhoneInvalid(String normalizedBody) {
+    return normalizedBody.contains("invalid phone login")
+        || normalizedBody.contains("invalid phone")
+        || normalizedBody.contains("phone is not active")
+        || normalizedBody.contains("phone login is not valid")
+        || normalizedBody.contains("phone code is not valid");
+  }
+
+  private boolean containsCampaignNotAssigned(String normalizedBody) {
+    return normalizedBody.contains("campaign not allowed")
+        || normalizedBody.contains("no campaign selected")
+        || normalizedBody.contains("is not in your user group allowed campaigns")
+        || normalizedBody.contains("not active on campaign");
+  }
+
+  private String normalize(String body) {
+    return Pattern.compile("\\s+").matcher(Objects.toString(body, "").toLowerCase()).replaceAll(" ");
+  }
+
   private VicidialHttpResult executePostWithCookies(String baseUrl, String path, Map<String, String> params, String agentUser) {
     CookieStore cookieStore = cookieStoreFor(agentUser);
     RequestConfig requestConfig = RequestConfig.custom()
         .setConnectTimeout(Timeout.ofMilliseconds(connectTimeout.toMillis()))
+        .setConnectionRequestTimeout(Timeout.ofMilliseconds(writeTimeout.toMillis()))
         .setResponseTimeout(Timeout.ofMilliseconds(readTimeout.toMillis()))
         .build();
 
@@ -389,8 +480,23 @@ public class VicidialClient {
 
   public record VicidialHttpResult(int statusCode, String body) {
     public String snippet() {
-      return Optional.ofNullable(body).orElse("").substring(0, Math.min(Optional.ofNullable(body).orElse("").length(), 200));
+      return snippet(200);
     }
+
+    public String snippet(int maxLength) {
+      String safeBody = Optional.ofNullable(body).orElse("");
+      return safeBody.substring(0, Math.min(safeBody.length(), Math.max(maxLength, 0)));
+    }
+  }
+
+  enum ConnectOutcome {
+    SUCCESS,
+    INVALID_CREDENTIALS,
+    PHONE_INVALID,
+    CAMPAIGN_NOT_ASSIGNED,
+    LOGIN_PAGE,
+    GENERIC_ERROR,
+    UNKNOWN
   }
 
   private record CookieSession(CookieStore cookieStore, Instant expiresAt) {
