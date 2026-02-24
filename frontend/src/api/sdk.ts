@@ -15,6 +15,7 @@ export const getVicidialStatus = ()=>api.get('/api/agent/vicidial/status').then(
 
 export const getActiveLead = ()=>api.get('/api/agent/active-lead').then(r=>r.data);
 export const getContext = (p:any)=>api.get('/api/agent/context',{params:p}).then(r=>r.data);
+export const dialManualNext = (payload:{campaignId:string;mode?:'predictive'|'manual'})=>api.post('/api/agent/vicidial/manual/next',payload).then(r=>r.data);
 export const saveInteraction = (payload:any)=>api.post('/api/agent/interactions',payload).then(r=>r.data);
 export const retryInteraction = (id:number)=>api.post(`/api/agent/interactions/${id}/retry-vicidial`).then(r=>r.data);
 export const previewAction = (payload:any)=>api.post('/api/agent/preview-action',payload).then(r=>r.data);

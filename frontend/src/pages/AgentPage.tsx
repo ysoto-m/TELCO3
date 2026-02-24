@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   connectVicidialCampaign,
+  dialManualNext,
   connectVicidialPhone,
   disconnectVicidialPhone,
   getActiveLead,
@@ -62,15 +63,18 @@ export default function AgentPage() {
     enabled: Boolean(status.data?.phoneConnected),
   });
 
-  const active = useQuery({ queryKey: ['active-lead'], queryFn: getActiveLead, enabled: Boolean(status.data?.campaign) });
+  const active = useQuery({
+    queryKey: ['active-lead'],
+    queryFn: getActiveLead,
+    enabled: Boolean(status.data?.campaign),
+    refetchInterval: mode === 'manual' ? false : 7000,
+  });
   const leadId = Number(sp.get('lead_id') || active.data?.leadId || 0) || undefined;
   const context = useQuery({
     queryKey: ['context', leadId, mode],
     queryFn: () =>
       getContext({
         leadId,
-        phone: sp.get('phone_number') || undefined,
-        campaign: sp.get('campaign') || status.data?.campaign || undefined,
         mode,
       }),
     enabled: Boolean(status.data?.campaign),
@@ -107,6 +111,13 @@ export default function AgentPage() {
   });
 
   const save = useMutation({ mutationFn: saveInteraction });
+  const manualNext = useMutation({
+    mutationFn: dialManualNext,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['active-lead'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
   const retry = useMutation({ mutationFn: retryInteraction });
   const c: any = context.data;
 
@@ -321,6 +332,20 @@ export default function AgentPage() {
             {save.data?.syncStatus !== 'SYNCED' && save.data?.id && (
               <Button onClick={() => retry.mutate(save.data.id)}>Reintentar</Button>
             )}
+            {mode === 'manual' && (active.data?.code === 'VICIDIAL_NO_ACTIVE_LEAD' || !c?.lead) && (
+              <Alert severity='info'>No hay lead activo. Presiona "Siguiente / Dial Next" para solicitar el próximo lead.</Alert>
+            )}
+            {mode === 'manual' && (
+              <Button
+                variant='contained'
+                onClick={() => manualNext.mutate({ campaignId: status.data?.campaign || campaign || '', mode })}
+                disabled={!campaignConnected || manualNext.isPending}
+              >
+                Siguiente / Dial Next
+              </Button>
+            )}
+            {manualNext.isError && <Alert severity='error'>No fue posible ejecutar DIAL NEXT NUMBER en Vicidial.</Alert>}
+            {manualNext.data?.ok && <Alert severity='success'>Marcación manual solicitada correctamente.</Alert>}
             {mode === 'manual' && (
               <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
                 <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'DIALONLY' })}>DIALONLY</Button>

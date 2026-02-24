@@ -179,6 +179,14 @@ public class VicidialClient {
     return call("/agc/api.php", new HashMap<>(Map.of("function", "external_pause", "agent_user", agent, "value", action))).body();
   }
 
+  public VicidialHttpResult externalDialManualNext(String agentUser) {
+    return post("/agc/api.php", new HashMap<>(Map.of(
+        "function", "external_dial",
+        "agent_user", agentUser,
+        "value", "MANUALNEXT"
+    )));
+  }
+
   public String activeLead(String agent) {
     return call("/agc/api.php", new HashMap<>(Map.of("function", "st_get_agent_active_lead", "agent_user", agent))).body();
   }
