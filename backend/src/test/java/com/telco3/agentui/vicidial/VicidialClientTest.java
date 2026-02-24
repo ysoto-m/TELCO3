@@ -48,8 +48,8 @@ class VicidialClientTest {
         "http://localhost:" + server.getAddress().getPort(), "api", "apiPass", "react_crm", false, "test"
     ));
 
-    VicidialClient client = new VicidialClient(configService, 4000, 4000, 30);
-    client.connectCampaign("48373608", "secret", "1001", "IVR");
+    VicidialClient client = new VicidialClient(configService, 4000, 4000, 4000);
+    client.connectToCampaign("48373608", "secret", "1001", "anexo_1001", "IVR", 695, 641);
 
     Map<String, String> form = parseForm(postedBody.get());
     assertEquals("0", form.get("DB"));
@@ -76,14 +76,37 @@ class VicidialClientTest {
 
   @Test
   void detectsInvalidCredentialsFromBody() {
-    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 30);
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
     assertTrue(client.containsInvalidCredentials("ERROR: Invalid Username/Password"));
   }
 
   @Test
   void successHeuristicReturnsTrueWhenLogoutIsPresent() {
-    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 30);
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
     assertTrue(client.hasConnectSuccessSignals("<a>Logout</a>"));
+  }
+
+
+
+  @Test
+  void evaluateCampaignConnectBodyDetectsLoginPageAsFailure() {
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
+    VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("<input name=\"VD_login\" /><input name=\"VD_pass\" />");
+    assertEquals(VicidialClient.ConnectOutcome.LOGIN_PAGE, outcome);
+  }
+
+  @Test
+  void evaluateCampaignConnectBodyDetectsInvalidCredentials() {
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
+    VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("Login incorrect");
+    assertEquals(VicidialClient.ConnectOutcome.INVALID_CREDENTIALS, outcome);
+  }
+
+  @Test
+  void evaluateCampaignConnectBodyDetectsSuccessByLogoutSignal() {
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
+    VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("<a href=logout.php>LOGOUT</a>");
+    assertEquals(VicidialClient.ConnectOutcome.SUCCESS, outcome);
   }
 
   @Test
@@ -107,7 +130,7 @@ class VicidialClientTest {
         "http://localhost:" + server.getAddress().getPort(), "api", "apiPass", "react_crm", false, "test"
     ));
 
-    VicidialClient client = new VicidialClient(configService, 100, 100, 30);
+    VicidialClient client = new VicidialClient(configService, 100, 100, 4000);
 
     VicidialServiceException ex = assertThrows(VicidialServiceException.class,
         () -> client.connectCampaign("48373608", "secret", "1001", "IVR"));
