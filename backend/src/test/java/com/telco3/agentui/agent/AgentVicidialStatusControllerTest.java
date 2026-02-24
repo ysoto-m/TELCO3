@@ -18,6 +18,7 @@ import java.util.Optional;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -160,4 +161,77 @@ class AgentVicidialStatusControllerTest {
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("VICIDIAL_RELOGIN_REQUIRED"));
   }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void manualNextWithoutConnectedSessionReturnsVicidialNotConnected() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
+
+    mockMvc.perform(post("/api/agent/vicidial/manual/next")
+            .contentType("application/json")
+            .content("{\"campaignId\":\"Manual\",\"mode\":\"manual\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_NOT_CONNECTED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void manualNextWhenAgentNotLoggedInRequiresRelogin() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "Manual";
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialClient.externalDialManualNext("agent1"))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: agent_user is not logged in"));
+
+    mockMvc.perform(post("/api/agent/vicidial/manual/next")
+            .contentType("application/json")
+            .content("{\"campaignId\":\"Manual\",\"mode\":\"manual\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_RELOGIN_REQUIRED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void manualNextPermissionDeniedMaps403() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "Manual";
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialClient.externalDialManualNext("agent1"))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: auth USER DOES NOT HAVE PERMISSION TO PERFORM FUNCTION"));
+
+    mockMvc.perform(post("/api/agent/vicidial/manual/next")
+            .contentType("application/json")
+            .content("{\"campaignId\":\"Manual\",\"mode\":\"manual\"}"))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_PERMISSION_DENIED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void contextWithoutConnectedSessionReturnsVicidialNotConnected() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
+
+    mockMvc.perform(get("/api/agent/context").param("mode", "predictive"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_NOT_CONNECTED"));
+  }
+
 }
