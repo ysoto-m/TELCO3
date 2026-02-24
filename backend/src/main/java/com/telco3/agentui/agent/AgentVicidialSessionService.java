@@ -126,13 +126,18 @@ public class AgentVicidialSessionService {
     AgentVicidialState state = requirePhoneConnected(agentUser);
 
     String agentPass = credentialService.resolveAgentPass(agentUser)
-        .orElseThrow(() -> new IllegalStateException("Debe configurar agent_pass en Perfil antes de conectar campaña"));
+        .orElseThrow(() -> new VicidialServiceException(
+            HttpStatus.BAD_REQUEST,
+            "VICIDIAL_AGENT_CREDENTIALS_MISSING",
+            "Falta agent_pass del agente en tabla users. El administrador debe completarlo para continuar.",
+            "Actualice users.agent_pass_encrypted para el usuario autenticado.",
+            Map.of("agentUser", mask(agentUser), "phoneLogin", state.phoneLogin)
+        ));
 
-    String raw = vicidialClient.agentLogin(agentUser, agentPass, state.phoneLogin, buildPhonePass(state.phoneLogin), campaignId);
-    boolean connected = isSuccessful(raw);
-    if (!connected) {
-      throw new IllegalStateException("No fue posible conectar a la campaña indicada");
-    }
+    long startedAt = System.nanoTime();
+    var result = vicidialClient.connectCampaign(agentUser, agentPass, state.phoneLogin, campaignId);
+    long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+    debugConnectCall(agentUser, state.phoneLogin, campaignId, result.statusCode(), elapsedMs, result.snippet());
 
     state.campaign = campaignId;
     state.mode = mode;
@@ -144,7 +149,7 @@ public class AgentVicidialSessionService {
         "campaign", campaignId,
         "mode", mode,
         "phoneLogin", state.phoneLogin,
-        "raw", raw
+        "raw", result.body()
     );
   }
 
@@ -177,6 +182,21 @@ public class AgentVicidialSessionService {
   private boolean isSuccessful(String raw) {
     String normalized = Objects.toString(raw, "").toUpperCase(Locale.ROOT);
     return normalized.contains("SUCCESS") || normalized.contains("LOGGED") || normalized.contains("200");
+  }
+
+  private void debugConnectCall(String agentUser, String phoneLogin, String campaignId, int statusCode, long durationMs, String snippet) {
+    if (!isDevEnvironment()) {
+      return;
+    }
+    log.info(
+        "Vicidial campaign connect debug endpoint=/agc/vicidial.php agentUser={} phoneLogin={} campaignId={} status={} durationMs={} snippet={}",
+        mask(agentUser),
+        phoneLogin,
+        campaignId,
+        statusCode,
+        durationMs,
+        snippet
+    );
   }
 
   private void debugCampaignCall(String agentUser, int statusCode, long durationMs, String snippet, boolean fallbackUsed) {
