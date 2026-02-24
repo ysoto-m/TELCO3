@@ -4,7 +4,6 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
@@ -32,10 +31,19 @@ class VicidialClientTest {
   @Test
   void connectCampaignSendsAllRequiredFieldsIncludingEmptyOnes() throws Exception {
     AtomicReference<String> postedBody = new AtomicReference<>("");
+    AtomicReference<String> contentType = new AtomicReference<>("");
+    AtomicReference<String> userAgent = new AtomicReference<>("");
+    AtomicReference<String> referer = new AtomicReference<>("");
+    AtomicReference<String> accept = new AtomicReference<>("");
+
     server = HttpServer.create(new InetSocketAddress(0), 0);
     server.createContext("/agc/vicidial.php", exchange -> {
       postedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-      byte[] response = "<html>Logout AGENT_ SESSION_name</html>".getBytes(StandardCharsets.UTF_8);
+      contentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+      userAgent.set(exchange.getRequestHeaders().getFirst("User-Agent"));
+      referer.set(exchange.getRequestHeaders().getFirst("Referer"));
+      accept.set(exchange.getRequestHeaders().getFirst("Accept"));
+      byte[] response = "<html><script>var session_name='ok'; var server_ip='1.1.1.1';</script>agc_main.php vdc_db_query.php</html>".getBytes(StandardCharsets.UTF_8);
       exchange.sendResponseHeaders(200, response.length);
       try (OutputStream os = exchange.getResponseBody()) {
         os.write(response);
@@ -43,13 +51,14 @@ class VicidialClientTest {
     });
     server.start();
 
+    int port = server.getAddress().getPort();
     VicidialConfigService configService = mock(VicidialConfigService.class);
     when(configService.resolve()).thenReturn(new VicidialConfigService.ResolvedVicidialConfig(
-        "http://localhost:" + server.getAddress().getPort(), "api", "apiPass", "react_crm", false, "test"
+        "http://localhost:" + port, "api", "apiPass", "react_crm", false, "test"
     ));
 
-    VicidialClient client = new VicidialClient(configService, 4000, 4000, 4000);
-    client.connectToCampaign("48373608", "secret", "1001", "anexo_1001", "IVR", 695, 641);
+    VicidialClient client = new VicidialClient(configService, 4000, 4000, 4000, false);
+    client.connectToCampaign("48373608", "secret", "1001", "anexo_1001", "IVR", null, null);
 
     Map<String, String> form = parseForm(postedBody.get());
     assertEquals("0", form.get("DB"));
@@ -57,12 +66,6 @@ class VicidialClientTest {
     assertEquals("695", form.get("JS_browser_width"));
     assertEquals("1001", form.get("phone_login"));
     assertEquals("anexo_1001", form.get("phone_pass"));
-    assertTrue(form.containsKey("LOGINvarONE"));
-    assertTrue(form.containsKey("LOGINvarTWO"));
-    assertTrue(form.containsKey("LOGINvarTHREE"));
-    assertTrue(form.containsKey("LOGINvarFOUR"));
-    assertTrue(form.containsKey("LOGINvarFIVE"));
-    assertTrue(form.containsKey("hide_relogin_fields"));
     assertEquals("", form.get("LOGINvarONE"));
     assertEquals("", form.get("LOGINvarTWO"));
     assertEquals("", form.get("LOGINvarTHREE"));
@@ -72,40 +75,31 @@ class VicidialClientTest {
     assertEquals("48373608", form.get("VD_login"));
     assertEquals("secret", form.get("VD_pass"));
     assertEquals("IVR", form.get("VD_campaign"));
+
+    assertTrue(contentType.get().startsWith("application/x-www-form-urlencoded"));
+    assertTrue(userAgent.get().contains("Mozilla"));
+    assertEquals("http://localhost:" + port + "/agc/vicidial.php", referer.get());
+    assertEquals("text/html,*/*", accept.get());
   }
-
-  @Test
-  void detectsInvalidCredentialsFromBody() {
-    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
-    assertTrue(client.containsInvalidCredentials("ERROR: Invalid Username/Password"));
-  }
-
-  @Test
-  void successHeuristicReturnsTrueWhenLogoutIsPresent() {
-    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
-    assertTrue(client.hasConnectSuccessSignals("<a>Logout</a>"));
-  }
-
-
 
   @Test
   void evaluateCampaignConnectBodyDetectsLoginPageAsFailure() {
-    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
     VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("<input name=\"VD_login\" /><input name=\"VD_pass\" />");
-    assertEquals(VicidialClient.ConnectOutcome.LOGIN_PAGE, outcome);
+    assertEquals(VicidialClient.ConnectOutcome.STILL_LOGIN_PAGE, outcome);
   }
 
   @Test
   void evaluateCampaignConnectBodyDetectsInvalidCredentials() {
-    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
     VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("Login incorrect");
     assertEquals(VicidialClient.ConnectOutcome.INVALID_CREDENTIALS, outcome);
   }
 
   @Test
-  void evaluateCampaignConnectBodyDetectsSuccessByLogoutSignal() {
-    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000);
-    VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("<a href=logout.php>LOGOUT</a>");
+  void evaluateCampaignConnectBodyDetectsSuccessByAgcMarkers() {
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
+    VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("<html>vdc_db_query.php ... agc_main.php</html>");
     assertEquals(VicidialClient.ConnectOutcome.SUCCESS, outcome);
   }
 
@@ -130,7 +124,7 @@ class VicidialClientTest {
         "http://localhost:" + server.getAddress().getPort(), "api", "apiPass", "react_crm", false, "test"
     ));
 
-    VicidialClient client = new VicidialClient(configService, 100, 100, 4000);
+    VicidialClient client = new VicidialClient(configService, 100, 100, 4000, false);
 
     VicidialServiceException ex = assertThrows(VicidialServiceException.class,
         () -> client.connectCampaign("48373608", "secret", "1001", "IVR"));

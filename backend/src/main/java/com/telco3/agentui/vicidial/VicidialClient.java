@@ -7,6 +7,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.netty.http.client.HttpClient;
 import reactor.core.Exceptions;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
@@ -43,13 +45,16 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Component
 public class VicidialClient {
+  private static final Logger log = LoggerFactory.getLogger(VicidialClient.class);
   private final VicidialConfigService configService;
   private final Duration connectTimeout;
   private final Duration readTimeout;
   private final Duration writeTimeout;
+  private final boolean vicidialDebug;
   private final Duration cookieTtl;
   private final ConcurrentHashMap<String, CookieSession> cookieSessions = new ConcurrentHashMap<>();
 
@@ -57,12 +62,14 @@ public class VicidialClient {
       VicidialConfigService configService,
       @Value("${vicidial.http.connect-timeout-ms:4000}") long connectTimeoutMs,
       @Value("${vicidial.http.read-timeout-ms:12000}") long readTimeoutMs,
-      @Value("${vicidial.http.write-timeout-ms:12000}") long writeTimeoutMs
+      @Value("${vicidial.http.write-timeout-ms:12000}") long writeTimeoutMs,
+      @Value("${app.vicidial.debug:false}") boolean vicidialDebug
   ) {
     this.configService = configService;
     this.connectTimeout = Duration.ofMillis(connectTimeoutMs);
     this.readTimeout = Duration.ofMillis(readTimeoutMs);
     this.writeTimeout = Duration.ofMillis(writeTimeoutMs);
+    this.vicidialDebug = vicidialDebug;
     this.cookieTtl = Duration.ofMinutes(30);
   }
 
@@ -246,7 +253,9 @@ public class VicidialClient {
     }
 
     var params = buildCampaignConnectParams(agentUser, agentPass, phoneLogin, phonePass, campaignId, browserWidth, browserHeight);
+    long startedAt = System.nanoTime();
     VicidialHttpResult result = executePostWithCookies(s.baseUrl(), "/agc/vicidial.php", params, agentUser);
+    long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
 
     if (result.statusCode() >= 400) {
       throw new VicidialServiceException(HttpStatus.BAD_GATEWAY,
@@ -258,40 +267,62 @@ public class VicidialClient {
 
     String body = Objects.toString(result.body(), "");
     ConnectOutcome outcome = evaluateCampaignConnectBody(body);
+    String classification = outcome.name();
+    String errorTextSnippet = extractVisibleErrorText(body);
+    debugConnectAttempt(s.baseUrl(), agentUser, phoneLogin, campaignId, result.statusCode(), durationMs, classification, result.snippet(400), params);
+
+    Map<String, Object> details = new LinkedHashMap<>();
+    details.put("httpStatus", result.statusCode());
+    details.put("classification", classification);
+    if (StringUtils.hasText(errorTextSnippet)) {
+      details.put("errorTextSnippet", errorTextSnippet);
+    }
+    details.put("rawSnippet", result.snippet(vicidialDebug ? 600 : 400));
+    if (vicidialDebug) {
+      details.put("debugRequest", buildDebugRequest(s.baseUrl(), params));
+    }
+
     if (outcome == ConnectOutcome.INVALID_CREDENTIALS) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_INVALID_CREDENTIALS",
           "Vicidial rechazó las credenciales del agente para conectar campaña.",
           "Revise agent_user/agent_pass en Vicidial.",
-          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet()));
+          details);
     }
     if (outcome == ConnectOutcome.PHONE_INVALID) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_PHONE_INVALID",
           "Vicidial rechazó el anexo o clave de teléfono del agente.",
           "Revise phone_login/phone_pass y estado del phone en Vicidial.",
-          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400)));
+          details);
     }
     if (outcome == ConnectOutcome.CAMPAIGN_NOT_ASSIGNED) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_NOT_ASSIGNED",
           "La campaña no está asignada o disponible para el agente en Vicidial.",
           "Valide que el agente tenga acceso a la campaña y que esté habilitada.",
-          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400)));
+          details);
     }
     if (outcome == ConnectOutcome.GENERIC_ERROR) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
           "Vicidial devolvió un error al conectar campaña.",
           "Revise permisos del user en Vicidial, campaña asignada y phone_login válido.",
-          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400)));
+          details);
+    }
+    if (outcome == ConnectOutcome.STILL_LOGIN_PAGE) {
+      throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
+          "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
+          "No fue posible confirmar conexión de campaña en Vicidial.",
+          "Vicidial devolvió pantalla de login/relogin.",
+          details);
     }
     if (outcome != ConnectOutcome.SUCCESS) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
           "No fue posible confirmar conexión de campaña en Vicidial.",
           "Revise permisos del user en Vicidial, campaña asignada, phone_login válido y respuesta HTML AGC.",
-          Map.of("httpStatus", result.statusCode(), "rawSnippet", result.snippet(400), "hint", "Vicidial devolvió HTML no concluyente o pantalla de login."));
+          details);
     }
     return result;
   }
@@ -331,13 +362,16 @@ public class VicidialClient {
         || text.contains("invalid password");
   }
 
-  boolean hasConnectSuccessSignals(String body) {
-    String text = Objects.toString(body, "");
-    return text.contains("LOGOUT")
-        || text.contains("Logout")
-        || text.contains("AGENT_")
-        || text.contains("vicidial.php?relogin")
-        || text.contains("SESSION_name");
+  boolean isAgentScreen(String body) {
+    String text = normalize(body);
+    int markersAgent = 0;
+    if (text.contains("agc_main.php")) markersAgent++;
+    if (text.contains("vdc_db_query.php")) markersAgent++;
+    if (text.contains("session_name")) markersAgent++;
+    if (text.contains("server_ip")) markersAgent++;
+    if (text.contains("campaign") && text.contains("phone_login")) markersAgent++;
+    if (text.contains("closer") || text.contains("inbound") || text.contains("dialnext") || text.contains("pause code") || text.contains("dispo")) markersAgent++;
+    return markersAgent >= 2;
   }
 
   private boolean containsAnyError(String body) {
@@ -347,7 +381,12 @@ public class VicidialClient {
   boolean containsLoginForm(String body) {
     String text = Objects.toString(body, "").toLowerCase();
     return text.contains("name=\"vd_login\"")
-        && text.contains("name=\"vd_pass\"");
+        || text.contains("id=\"vd_login\"")
+        || text.contains("name=\"vd_pass\"")
+        || text.contains("id=\"vd_pass\"")
+        || text.contains("please login")
+        || text.contains("agent login")
+        || text.contains("re-login");
   }
 
   ConnectOutcome evaluateCampaignConnectBody(String body) {
@@ -362,9 +401,9 @@ public class VicidialClient {
       return ConnectOutcome.CAMPAIGN_NOT_ASSIGNED;
     }
     if (containsLoginForm(body)) {
-      return ConnectOutcome.LOGIN_PAGE;
+      return ConnectOutcome.STILL_LOGIN_PAGE;
     }
-    if (hasConnectSuccessSignals(body)) {
+    if (isAgentScreen(body)) {
       return ConnectOutcome.SUCCESS;
     }
     if (containsAnyError(body)) {
@@ -378,7 +417,24 @@ public class VicidialClient {
         || normalizedBody.contains("invalid phone")
         || normalizedBody.contains("phone is not active")
         || normalizedBody.contains("phone login is not valid")
-        || normalizedBody.contains("phone code is not valid");
+        || normalizedBody.contains("phone code is not valid")
+        || normalizedBody.contains("invalid extension")
+        || normalizedBody.contains("invalid station")
+        || normalizedBody.contains("phone_login is not valid");
+  }
+
+  private String extractVisibleErrorText(String body) {
+    String noScripts = Objects.toString(body, "")
+        .replaceAll("(?is)<script[^>]*>.*?</script>", " ")
+        .replaceAll("(?is)<style[^>]*>.*?</style>", " ");
+    String text = noScripts.replaceAll("(?is)<[^>]+>", " ")
+        .replaceAll("&nbsp;", " ")
+        .replaceAll("\\s+", " ")
+        .trim();
+    if (!StringUtils.hasText(text)) {
+      return "";
+    }
+    return text.substring(0, Math.min(text.length(), 240));
   }
 
   private boolean containsCampaignNotAssigned(String normalizedBody) {
@@ -408,7 +464,10 @@ public class VicidialClient {
         .build()) {
 
       HttpPost request = new HttpPost(resolveUri(baseUrl, path));
-      request.setHeader("Content-Type", MediaType.APPLICATION_FORM_URLENCODED_VALUE);
+      request.setHeader("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+      request.setHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36");
+      request.setHeader("Referer", normalizeBaseUrl(baseUrl) + "/agc/vicidial.php");
+      request.setHeader("Accept", "text/html,*/*");
       request.setEntity(new UrlEncodedFormEntity(toNameValuePairs(params), StandardCharsets.UTF_8));
 
       return httpClient.execute(request, response -> {
@@ -448,6 +507,72 @@ public class VicidialClient {
     List<NameValuePair> pairs = new ArrayList<>();
     params.forEach((key, value) -> pairs.add(new BasicNameValuePair(key, Objects.toString(value, ""))));
     return pairs;
+  }
+
+  private String normalizeBaseUrl(String baseUrl) {
+    if (baseUrl == null) {
+      return "";
+    }
+    return baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+  }
+
+  private Map<String, Object> buildDebugRequest(String baseUrl, Map<String, String> params) {
+    Map<String, Object> debug = new LinkedHashMap<>();
+    debug.put("url", normalizeBaseUrl(baseUrl) + "/agc/vicidial.php");
+    debug.put("method", "POST");
+    debug.put("formParams", maskSensitiveParams(params));
+    debug.put("headers", Map.of(
+        "Content-Type", "application/x-www-form-urlencoded; charset=UTF-8",
+        "User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        "Referer", normalizeBaseUrl(baseUrl) + "/agc/vicidial.php",
+        "Accept", "text/html,*/*"
+    ));
+    return debug;
+  }
+
+  private Map<String, String> maskSensitiveParams(Map<String, String> params) {
+    return params.entrySet().stream()
+        .sorted(Map.Entry.comparingByKey())
+        .collect(Collectors.toMap(
+            Map.Entry::getKey,
+            e -> isSensitiveField(e.getKey()) ? "***" : Objects.toString(e.getValue(), ""),
+            (left, right) -> left,
+            LinkedHashMap::new
+        ));
+  }
+
+  private boolean isSensitiveField(String key) {
+    return Objects.toString(key, "").toLowerCase().contains("pass");
+  }
+
+  private void debugConnectAttempt(String baseUrl, String agentUser, String phoneLogin, String campaignId, int statusCode, long durationMs, String classification, String snippet, Map<String, String> params) {
+    if (!vicidialDebug) {
+      return;
+    }
+    Map<String, String> safeParams = maskSensitiveParams(params);
+    String encoded = safeParams.entrySet().stream()
+        .map(e -> java.net.URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8) + "=" + java.net.URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
+        .collect(Collectors.joining("&"));
+    log.info("Vicidial connect debug method=POST url={} endpoint=/agc/vicidial.php agentUser={} phoneLogin={} campaignId={} status={} classification={} durationMs={} form={} snippet={}",
+        normalizeBaseUrl(baseUrl) + "/agc/vicidial.php",
+        maskAgentUser(agentUser),
+        phoneLogin,
+        campaignId,
+        statusCode,
+        classification,
+        durationMs,
+        encoded,
+        snippet);
+  }
+
+  private String maskAgentUser(String agentUser) {
+    if (!StringUtils.hasText(agentUser)) {
+      return "***";
+    }
+    if (agentUser.length() <= 2) {
+      return "**";
+    }
+    return agentUser.substring(0, 2) + "***";
   }
 
   private URI resolveUri(String baseUrl, String path) {
@@ -494,7 +619,7 @@ public class VicidialClient {
     INVALID_CREDENTIALS,
     PHONE_INVALID,
     CAMPAIGN_NOT_ASSIGNED,
-    LOGIN_PAGE,
+    STILL_LOGIN_PAGE,
     GENERIC_ERROR,
     UNKNOWN
   }
