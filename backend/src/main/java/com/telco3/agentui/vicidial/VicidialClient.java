@@ -330,7 +330,13 @@ public class VicidialClient {
         touchCookieSession(agentUser);
         return new VicidialHttpResult(response.getCode(), body);
       });
-    } catch (ConnectTimeoutException | SocketTimeoutException ex) {
+    } catch (ConnectTimeoutException ex) {
+      throw new VicidialServiceException(HttpStatus.SERVICE_UNAVAILABLE,
+          "VICIDIAL_UNREACHABLE",
+          "Vicidial no respondió dentro del tiempo esperado.",
+          "Verifique conectividad a VICIDIAL_BASE_URL y estado del servidor.",
+          Map.of("cause", ex.getClass().getSimpleName()));
+    } catch (SocketTimeoutException ex) {
       throw new VicidialServiceException(HttpStatus.SERVICE_UNAVAILABLE,
           "VICIDIAL_UNREACHABLE",
           "Vicidial no respondió dentro del tiempo esperado.",
