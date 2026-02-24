@@ -3,3 +3,6 @@ spring:
     url: jdbc:postgresql://localhost:5432/agentui
     username: postgres
     password: postgres
+app:
+  vicidial:
+    debug: true

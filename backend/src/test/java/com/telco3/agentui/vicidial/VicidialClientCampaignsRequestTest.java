@@ -54,7 +54,7 @@ class VicidialClientCampaignsRequestTest {
         "test"
     ));
 
-    VicidialClient client = new VicidialClient(configService, 2000L, 4000L, 4000L);
+    VicidialClient client = new VicidialClient(configService, 2000L, 4000L, 4000L, false);
     var result = client.campaignsForAgent("48373608", "agentPass123");
 
     Map<String, String> form = parseQuery(receivedBody);
