@@ -1,8 +1,6 @@
 package com.telco3.agentui.agent;
 
-import com.telco3.agentui.domain.CustomerPhoneRepository;
-import com.telco3.agentui.domain.CustomerRepository;
-import com.telco3.agentui.domain.InteractionRepository;
+import com.telco3.agentui.domain.*;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import org.junit.jupiter.api.Test;
@@ -16,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -46,6 +45,12 @@ class AgentVicidialStatusControllerTest {
 
   @MockBean
   private AgentVicidialSessionService vicidialSessionService;
+
+  @MockBean
+  private UserRepository userRepository;
+
+  @MockBean
+  private AgentVicidialCredentialRepository agentVicidialCredentialRepository;
 
   @Test
   @WithMockUser(username = "agent1")
@@ -100,5 +105,59 @@ class AgentVicidialStatusControllerTest {
         .andExpect(jsonPath("$.agentUser").value("agent1"))
         .andExpect(jsonPath("$.apiPass").doesNotExist())
         .andExpect(jsonPath("$.pass").doesNotExist());
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void activeLeadWithoutConnectedSessionReturnsVicidialNotConnected() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
+
+    mockMvc.perform(get("/api/agent/active-lead"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_NOT_CONNECTED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void activeLeadWithoutLeadReturnsNoActiveLeadBusinessPayload() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "IVR";
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialClient.activeLeadSafe("agent1"))
+        .thenReturn(new VicidialClient.ActiveLeadResult(VicidialClient.ActiveLeadOutcome.NO_ACTIVE_LEAD, "No active lead", 200));
+
+    mockMvc.perform(get("/api/agent/active-lead"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ok").value(false))
+        .andExpect(jsonPath("$.code").value("VICIDIAL_NO_ACTIVE_LEAD"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void activeLeadWhenVicidialReturnsLoginPageRequiresRelogin() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "IVR";
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialClient.activeLeadSafe("agent1"))
+        .thenReturn(new VicidialClient.ActiveLeadResult(VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED, "<html>login</html>", 200));
+
+    mockMvc.perform(get("/api/agent/active-lead"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_RELOGIN_REQUIRED"));
   }
 }

@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telco3.agentui.domain.*;
 import com.telco3.agentui.domain.Entities.*;
 import com.telco3.agentui.vicidial.VicidialClient;
+import com.telco3.agentui.vicidial.VicidialServiceException;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,6 +22,9 @@ public class AgentController {
   private final CustomerPhoneRepository phones;
   private final VicidialCredentialService credentialService;
   private final AgentVicidialSessionService vicidialSessionService;
+  private final UserRepository userRepository;
+  private final AgentVicidialCredentialRepository agentVicidialCredentialRepository;
+  private final boolean vicidialDebug;
   private final ObjectMapper mapper = new ObjectMapper();
 
   public AgentController(
@@ -27,7 +33,10 @@ public class AgentController {
       CustomerRepository customers,
       CustomerPhoneRepository phones,
       VicidialCredentialService credentialService,
-      AgentVicidialSessionService vicidialSessionService
+      AgentVicidialSessionService vicidialSessionService,
+      UserRepository userRepository,
+      AgentVicidialCredentialRepository agentVicidialCredentialRepository,
+      @Value("${app.vicidial.debug:false}") boolean vicidialDebug
   ){
     this.vicidial=vicidial;
     this.interactions=interactions;
@@ -35,6 +44,9 @@ public class AgentController {
     this.phones=phones;
     this.credentialService = credentialService;
     this.vicidialSessionService = vicidialSessionService;
+    this.userRepository = userRepository;
+    this.agentVicidialCredentialRepository = agentVicidialCredentialRepository;
+    this.vicidialDebug = vicidialDebug;
   }
 
   public record AgentProfileResponse(boolean hasAgentPass, String lastPhoneLogin, String lastCampaign, boolean rememberCredentials, boolean connected, String connectedPhoneLogin, String connectedCampaign, String agentUser) {}
@@ -88,9 +100,43 @@ public class AgentController {
 
   @GetMapping("/active-lead")
   Map<String,Object> active(Authentication auth){
-    var raw=vicidial.activeLead(requireAuth(auth));
-    Long leadId=extractLong(raw,"lead_id");
-    return Map.of("leadId",leadId,"phoneNumber",extract(raw,"phone_number"),"campaign",extract(raw,"campaign"));
+    String agentUser = requireAuth(auth);
+    ensureAgentExists(agentUser);
+    var session = requireConnectedSession(agentUser);
+    requireSessionField(session.connectedPhoneLogin, "phone_login");
+    requireSessionField(session.connectedCampaign, "campaign");
+
+    var leadResult = vicidial.activeLeadSafe(agentUser);
+    String raw = Objects.toString(leadResult.rawBody(), "");
+    String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
+    if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_RELOGIN_REQUIRED",
+          "La sesión de Vicidial requiere re-login.",
+          "Conecte anexo/campaña nuevamente para continuar.",
+          buildActiveLeadDetails("RELOGIN_REQUIRED", leadResult.httpStatus(), rawSnippet, agentUser));
+    }
+
+    if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.NO_ACTIVE_LEAD || leadResult.outcome() == VicidialClient.ActiveLeadOutcome.UNKNOWN) {
+      Map<String, Object> details = buildActiveLeadDetails("NO_ACTIVE_LEAD", leadResult.httpStatus(), rawSnippet, agentUser);
+      return businessNoLeadResponse(details);
+    }
+
+    Long leadId = extractLong(raw, "lead_id");
+    if (leadId == null) {
+      return businessNoLeadResponse(buildActiveLeadDetails("PARSE_EMPTY_LEAD", leadResult.httpStatus(), rawSnippet, agentUser));
+    }
+    Map<String, Object> lead = new LinkedHashMap<>();
+    lead.put("leadId", leadId);
+    lead.put("phoneNumber", extract(raw, "phone_number"));
+    lead.put("campaign", extract(raw, "campaign"));
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("ok", true);
+    response.put("lead", lead);
+    if (vicidialDebug) {
+      response.put("rawSnippet", rawSnippet);
+    }
+    return response;
   }
 
   @GetMapping("/context")
@@ -154,7 +200,69 @@ public class AgentController {
   }
 
   private String extract(String raw, String key){
-    var m=java.util.regex.Pattern.compile(key+"=([^&\\n]+)").matcher(raw); return m.find()?m.group(1):"";
+    var m=java.util.regex.Pattern.compile(key+"=([^&\\n]+)").matcher(Objects.toString(raw, "")); return m.find()?m.group(1):"";
   }
   private Long extractLong(String raw,String key){ try{return Long.parseLong(extract(raw,key));}catch(Exception e){return null;} }
+
+  private void ensureAgentExists(String agentUser) {
+    if (userRepository.findByUsernameAndActiveTrue(agentUser).isEmpty()) {
+      throw new VicidialServiceException(HttpStatus.NOT_FOUND,
+          "AGENT_NOT_FOUND",
+          "No existe un agente activo para el usuario autenticado.");
+    }
+  }
+
+  private Entities.AgentVicidialCredentialEntity requireConnectedSession(String agentUser) {
+    var session = agentVicidialCredentialRepository.findByAppUsername(agentUser)
+        .orElseThrow(() -> new VicidialServiceException(
+            HttpStatus.CONFLICT,
+            "VICIDIAL_NOT_CONNECTED",
+            "El agente no tiene sesión Vicidial conectada.",
+            "conecte anexo/campaña primero",
+            null
+        ));
+    if (!session.connected) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_NOT_CONNECTED",
+          "El agente no tiene sesión Vicidial conectada.",
+          "conecte anexo/campaña primero",
+          null);
+    }
+    return session;
+  }
+
+  private void requireSessionField(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_SESSION_INCOMPLETE",
+          "La sesión Vicidial está incompleta.",
+          "Falta el campo requerido: " + field,
+          Map.of("missingField", field));
+    }
+  }
+
+  private Map<String, Object> businessNoLeadResponse(Map<String, Object> details) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("ok", false);
+    body.put("code", "VICIDIAL_NO_ACTIVE_LEAD");
+    body.put("message", "No hay lead activo");
+    body.put("hint", "Espere que entre llamada / verifique hopper");
+    body.put("details", details);
+    return body;
+  }
+
+  private Map<String, Object> buildActiveLeadDetails(String classification, int httpStatus, String rawSnippet, String agentUser) {
+    Map<String, Object> details = new LinkedHashMap<>();
+    details.put("classification", classification);
+    details.put("httpStatus", httpStatus);
+    if (vicidialDebug) {
+      details.put("rawSnippet", rawSnippet);
+      details.put("debugRequest", Map.of(
+          "endpoint", "/agc/api.php",
+          "function", "st_get_agent_active_lead",
+          "agentUser", agentUser
+      ));
+    }
+    return details;
+  }
 }

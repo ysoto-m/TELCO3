@@ -90,6 +90,14 @@ class VicidialClientTest {
   }
 
   @Test
+  void evaluateCampaignConnectBodyDetectsNoLeadsBeforeLoginPage() {
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
+    String html = "<html><body>Sorry, there are no leads in the hopper for this campaign<input name=\"VD_login\" /></body></html>";
+    VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody(html);
+    assertEquals(VicidialClient.ConnectOutcome.NO_LEADS, outcome);
+  }
+
+  @Test
   void evaluateCampaignConnectBodyDetectsInvalidCredentials() {
     VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
     VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("Login incorrect");
@@ -101,6 +109,13 @@ class VicidialClientTest {
     VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
     VicidialClient.ConnectOutcome outcome = client.evaluateCampaignConnectBody("<html>vdc_db_query.php ... agc_main.php</html>");
     assertEquals(VicidialClient.ConnectOutcome.SUCCESS, outcome);
+  }
+
+  @Test
+  void evaluateActiveLeadBodyDetectsRelogin() {
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
+    assertEquals(VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED,
+        client.evaluateActiveLeadBody("<form><input name=\"VD_login\"/></form>"));
   }
 
   @Test
