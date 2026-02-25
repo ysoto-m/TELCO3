@@ -76,7 +76,9 @@ export default function AgentPage() {
     enabled: Boolean(status.data?.campaign),
     refetchInterval: isManualFlow ? false : 7000,
   });
+
   const leadId = Number(sp.get('lead_id') || active.data?.leadId || 0) || undefined;
+
   const context = useQuery({
     queryKey: ['context', leadId, mode],
     queryFn: () =>
@@ -94,6 +96,7 @@ export default function AgentPage() {
       qc.invalidateQueries({ queryKey: ['campaigns'] });
     },
   });
+
   const connectCampaign = useMutation({
     mutationFn: connectVicidialCampaign,
     onSuccess: () => {
@@ -101,6 +104,7 @@ export default function AgentPage() {
       qc.invalidateQueries({ queryKey: ['agent-profile'] });
     },
   });
+
   const disconnect = useMutation({
     mutationFn: disconnectVicidialPhone,
     onSuccess: () => {
@@ -109,6 +113,7 @@ export default function AgentPage() {
       qc.invalidateQueries({ queryKey: ['agent-profile'] });
     },
   });
+
   const updatePass = useMutation({
     mutationFn: updateAgentProfilePass,
     onSuccess: () => {
@@ -118,6 +123,7 @@ export default function AgentPage() {
   });
 
   const save = useMutation({ mutationFn: saveInteraction });
+
   const manualNext = useMutation({
     mutationFn: dialNext,
     onSuccess: () => {
@@ -125,6 +131,7 @@ export default function AgentPage() {
       qc.invalidateQueries({ queryKey: ['context'] });
     },
   });
+
   const manualDialMut = useMutation({
     mutationFn: manualDial,
     onSuccess: () => {
@@ -132,7 +139,9 @@ export default function AgentPage() {
       qc.invalidateQueries({ queryKey: ['context'] });
     },
   });
+
   const retry = useMutation({ mutationFn: retryInteraction });
+
   const c: any = context.data;
 
   const phoneConnected = Boolean(status.data?.phoneConnected);
@@ -199,6 +208,7 @@ export default function AgentPage() {
             <Typography variant='body2' color='text.secondary' sx={{ mb: 1 }}>
               Agent pass: {profile.data?.hasAgentPass ? '••••••••' : 'No configurado'}
             </Typography>
+
             <TextField
               size='small'
               fullWidth
@@ -216,7 +226,9 @@ export default function AgentPage() {
             >
               Guardar
             </Button>
+
             <Divider sx={{ my: 1 }} />
+
             <MenuItem onClick={() => setProfileMenuAnchor(null)}>Perfil</MenuItem>
             <MenuItem
               onClick={() => {
@@ -250,6 +262,7 @@ export default function AgentPage() {
                 Desconectar
               </Button>
             </Stack>
+
             {connectPhone.error && <Alert severity='error'>No fue posible conectar anexo.</Alert>}
             {connectPhone.data?.raw && <Alert severity='success'>Anexo conectado correctamente.</Alert>}
             {campaignsQuery.isError && <Alert severity='error'>No fue posible cargar campañas.</Alert>}
@@ -261,6 +274,7 @@ export default function AgentPage() {
             {!profile.data?.hasAgentPass && (
               <Alert severity='warning'>Debes configurar tu agent_pass en Perfil antes de conectar campaña.</Alert>
             )}
+
             <Stack direction={{ xs: 'column', md: 'row' }} gap={1} alignItems={{ xs: 'stretch', md: 'center' }}>
               <TextField
                 select
@@ -276,10 +290,12 @@ export default function AgentPage() {
                   </MenuItem>
                 ))}
               </TextField>
+
               <FormControlLabel
                 control={<Checkbox checked={remember} onChange={(e) => setRemember(e.target.checked)} />}
                 label='Recordar'
               />
+
               <Button
                 variant='contained'
                 disabled={!profile.data?.hasAgentPass || !campaign || !phoneConnected || campaignConnected}
@@ -294,6 +310,7 @@ export default function AgentPage() {
                 Conectar campaña
               </Button>
             </Stack>
+
             {connectCampaign.error && <Alert severity='error'>No fue posible conectar campaña.</Alert>}
           </Stack>
         </ViciCard>
@@ -303,13 +320,17 @@ export default function AgentPage() {
             {!canType && (
               <Alert severity='info'>Debes conectar anexo y campaña para habilitar disposición, notas y guardado.</Alert>
             )}
+
             <Divider />
+
             <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'background.default', overflowX: 'auto' }}>
               <pre>{JSON.stringify(c?.lead, null, 2)}</pre>
             </Box>
+
             <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: 'background.default', overflowX: 'auto' }}>
               <pre>{JSON.stringify(c?.customer, null, 2)}</pre>
             </Box>
+
             <TextField
               select
               label='Disposición'
@@ -323,6 +344,7 @@ export default function AgentPage() {
                 </MenuItem>
               ))}
             </TextField>
+
             <TextField
               label='Notas'
               multiline
@@ -331,6 +353,7 @@ export default function AgentPage() {
               onChange={(e) => setNotes(e.target.value)}
               disabled={!canType}
             />
+
             <Button
               variant='contained'
               disabled={!canType || !dispo}
@@ -349,29 +372,44 @@ export default function AgentPage() {
             >
               Guardar gestión
             </Button>
+
             {save.data?.syncStatus !== 'SYNCED' && save.data?.id && (
               <Button onClick={() => retry.mutate(save.data.id)}>Reintentar</Button>
             )}
+
             {isManualFlow && (active.data?.code === 'VICIDIAL_NO_ACTIVE_LEAD' || !c?.lead) && (
-              <Alert severity='info'>No hay lead activo. Presiona "Siguiente / Dial Next" para solicitar el próximo lead.</Alert>
+              <Alert severity='info'>
+                No hay lead activo. Presiona &quot;Siguiente / Dial Next&quot; para solicitar el próximo lead.
+              </Alert>
             )}
+
             {isManualFlow && (
               <Stack gap={1} sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.100' }}>
-                <Typography variant='subtitle1' fontWeight={700}>Marcación manual · Contact Center</Typography>
+                <Typography variant='subtitle1' fontWeight={700}>
+                  Marcación manual · Contact Center
+                </Typography>
+
                 <Stack direction={{ xs: 'column', md: 'row' }} gap={1}>
                   <Button
                     variant='contained'
-                    onClick={() => manualNext.mutate({ campaignId: status.data?.campaign || campaign || '', mode: 'manual' })}
+                    onClick={() =>
+                      manualNext.mutate({
+                        campaignId: status.data?.campaign || campaign || '',
+                        mode: 'manual',
+                      })
+                    }
                     disabled={!campaignConnected || manualNext.isPending}
                   >
                     Siguiente
                   </Button>
+
                   <TextField
                     label='Número a marcar'
                     value={manualNumber}
                     onChange={(e) => setManualNumber(e.target.value.replace(/[^0-9]/g, ''))}
                     size='small'
                   />
+
                   <TextField
                     label='Código país'
                     value={manualCode}
@@ -379,37 +417,49 @@ export default function AgentPage() {
                     size='small'
                     sx={{ maxWidth: 140 }}
                   />
+
                   <Button
                     variant='contained'
                     color='secondary'
                     disabled={!campaignConnected || !manualNumber || manualDialMut.isPending}
-                    onClick={() => manualDialMut.mutate({
-                      campaignId: status.data?.campaign || campaign || '',
-                      phoneNumber: manualNumber,
-                      phoneCode: manualCode || '51',
-                      dialTimeout: 60,
-                      dialPrefix: '9',
-                      preview: 'NO',
-                    })}
+                    onClick={() =>
+                      manualDialMut.mutate({
+                        campaignId: status.data?.campaign || campaign || '',
+                        phoneNumber: manualNumber,
+                        phoneCode: manualCode || '51',
+                        dialTimeout: 60,
+                        dialPrefix: '9',
+                        preview: 'NO',
+                      })
+                    }
                   >
                     Marcar
                   </Button>
                 </Stack>
               </Stack>
             )}
+
             {manualNext.isError && <Alert severity='error'>No fue posible ejecutar DIAL NEXT NUMBER en Vicidial.</Alert>}
             {manualNext.data?.ok && <Alert severity='success'>Marcación manual solicitada correctamente.</Alert>}
             {manualDialMut.isError && <Alert severity='error'>No fue posible ejecutar MANUAL DIAL.</Alert>}
             {manualDialMut.data?.ok && (
               <Alert severity='success'>Llamada solicitada. Call ID: {manualDialMut.data?.callId || 'N/D'}.</Alert>
             )}
+
             {isManualFlow && (
               <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
-                <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'DIALONLY' })}>DIALONLY</Button>
-                <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'SKIP' })}>SKIP</Button>
-                <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'FINISH' })}>FINISH</Button>
+                <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'DIALONLY' })}>
+                  DIALONLY
+                </Button>
+                <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'SKIP' })}>
+                  SKIP
+                </Button>
+                <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'FINISH' })}>
+                  FINISH
+                </Button>
               </Stack>
             )}
+
             <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
               <Button variant='outlined' onClick={() => pauseAction({ action: 'PAUSE' })}>
                 Pause
