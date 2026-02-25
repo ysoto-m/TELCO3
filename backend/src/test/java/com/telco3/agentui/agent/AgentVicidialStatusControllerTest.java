@@ -170,7 +170,7 @@ class AgentVicidialStatusControllerTest {
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
 
-    mockMvc.perform(post("/api/agent/vicidial/manual/next")
+    mockMvc.perform(post("/api/agent/vicidial/dial/next")
             .contentType("application/json")
             .content("{\"campaignId\":\"Manual\",\"mode\":\"manual\"}"))
         .andExpect(status().isConflict())
@@ -192,7 +192,7 @@ class AgentVicidialStatusControllerTest {
     when(vicidialClient.externalDialManualNext("agent1"))
         .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: agent_user is not logged in"));
 
-    mockMvc.perform(post("/api/agent/vicidial/manual/next")
+    mockMvc.perform(post("/api/agent/vicidial/dial/next")
             .contentType("application/json")
             .content("{\"campaignId\":\"Manual\",\"mode\":\"manual\"}"))
         .andExpect(status().isConflict())
@@ -214,11 +214,57 @@ class AgentVicidialStatusControllerTest {
     when(vicidialClient.externalDialManualNext("agent1"))
         .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: auth USER DOES NOT HAVE PERMISSION TO PERFORM FUNCTION"));
 
-    mockMvc.perform(post("/api/agent/vicidial/manual/next")
+    mockMvc.perform(post("/api/agent/vicidial/dial/next")
             .contentType("application/json")
             .content("{\"campaignId\":\"Manual\",\"mode\":\"manual\"}"))
         .andExpect(status().isForbidden())
         .andExpect(jsonPath("$.code").value("VICIDIAL_PERMISSION_DENIED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void manualDialWithIncompleteSessionReturnsVicidialSessionIncomplete() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "Manual";
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+
+    mockMvc.perform(post("/api/agent/vicidial/dial/manual")
+            .contentType("application/json")
+            .content("{\"campaignId\":\"Manual2\",\"phoneNumber\":\"970222277\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_SESSION_INCOMPLETE"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void manualDialNotLoggedInReturnsReloginRequired() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "Manual";
+    session.sessionName = "sess";
+    session.serverIp = "10.10.10.10";
+    session.agentLogId = 99L;
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
+    when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: agent_user is not logged in"));
+
+    mockMvc.perform(post("/api/agent/vicidial/dial/manual")
+            .contentType("application/json")
+            .content("{\"campaignId\":\"Manual2\",\"phoneNumber\":\"970222277\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_RELOGIN_REQUIRED"));
   }
 
   @Test
