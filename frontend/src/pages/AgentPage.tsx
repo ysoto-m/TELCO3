@@ -18,12 +18,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   connectVicidialCampaign,
-  dialManualNext,
+  dialNext,
   connectVicidialPhone,
   disconnectVicidialPhone,
   getActiveLead,
   getAgentProfile,
   getContext,
+  manualDial,
   getVicidialCampaigns,
   getVicidialStatus,
   pauseAction,
@@ -47,6 +48,8 @@ export default function AgentPage() {
   const [remember, setRemember] = useState(true);
   const [profileMenuAnchor, setProfileMenuAnchor] = useState<null | HTMLElement>(null);
   const [agentPass, setAgentPass] = useState('');
+  const [manualNumber, setManualNumber] = useState('');
+  const [manualCode, setManualCode] = useState('51');
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -63,11 +66,15 @@ export default function AgentPage() {
     enabled: Boolean(status.data?.phoneConnected),
   });
 
+  const campaignHint = status.data?.campaign || campaign || '';
+  const manualByCampaign = /manual/i.test(campaignHint);
+  const isManualFlow = mode === 'manual' || manualByCampaign;
+
   const active = useQuery({
     queryKey: ['active-lead'],
     queryFn: getActiveLead,
     enabled: Boolean(status.data?.campaign),
-    refetchInterval: mode === 'manual' ? false : 7000,
+    refetchInterval: isManualFlow ? false : 7000,
   });
   const leadId = Number(sp.get('lead_id') || active.data?.leadId || 0) || undefined;
   const context = useQuery({
@@ -112,7 +119,14 @@ export default function AgentPage() {
 
   const save = useMutation({ mutationFn: saveInteraction });
   const manualNext = useMutation({
-    mutationFn: dialManualNext,
+    mutationFn: dialNext,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['active-lead'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
+  const manualDialMut = useMutation({
+    mutationFn: manualDial,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['active-lead'] });
       qc.invalidateQueries({ queryKey: ['context'] });
@@ -269,7 +283,13 @@ export default function AgentPage() {
               <Button
                 variant='contained'
                 disabled={!profile.data?.hasAgentPass || !campaign || !phoneConnected || campaignConnected}
-                onClick={() => connectCampaign.mutate({ campaignId: campaign, mode, rememberCredentials: remember })}
+                onClick={() =>
+                  connectCampaign.mutate({
+                    campaignId: campaign,
+                    mode: /manual/i.test(campaign) ? 'manual' : mode,
+                    rememberCredentials: remember,
+                  })
+                }
               >
                 Conectar campaña
               </Button>
@@ -332,21 +352,58 @@ export default function AgentPage() {
             {save.data?.syncStatus !== 'SYNCED' && save.data?.id && (
               <Button onClick={() => retry.mutate(save.data.id)}>Reintentar</Button>
             )}
-            {mode === 'manual' && (active.data?.code === 'VICIDIAL_NO_ACTIVE_LEAD' || !c?.lead) && (
+            {isManualFlow && (active.data?.code === 'VICIDIAL_NO_ACTIVE_LEAD' || !c?.lead) && (
               <Alert severity='info'>No hay lead activo. Presiona "Siguiente / Dial Next" para solicitar el próximo lead.</Alert>
             )}
-            {mode === 'manual' && (
-              <Button
-                variant='contained'
-                onClick={() => manualNext.mutate({ campaignId: status.data?.campaign || campaign || '', mode })}
-                disabled={!campaignConnected || manualNext.isPending}
-              >
-                Siguiente / Dial Next
-              </Button>
+            {isManualFlow && (
+              <Stack gap={1} sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.100' }}>
+                <Typography variant='subtitle1' fontWeight={700}>Marcación manual · Contact Center</Typography>
+                <Stack direction={{ xs: 'column', md: 'row' }} gap={1}>
+                  <Button
+                    variant='contained'
+                    onClick={() => manualNext.mutate({ campaignId: status.data?.campaign || campaign || '', mode: 'manual' })}
+                    disabled={!campaignConnected || manualNext.isPending}
+                  >
+                    Siguiente
+                  </Button>
+                  <TextField
+                    label='Número a marcar'
+                    value={manualNumber}
+                    onChange={(e) => setManualNumber(e.target.value.replace(/[^0-9]/g, ''))}
+                    size='small'
+                  />
+                  <TextField
+                    label='Código país'
+                    value={manualCode}
+                    onChange={(e) => setManualCode(e.target.value.replace(/[^0-9]/g, ''))}
+                    size='small'
+                    sx={{ maxWidth: 140 }}
+                  />
+                  <Button
+                    variant='contained'
+                    color='secondary'
+                    disabled={!campaignConnected || !manualNumber || manualDialMut.isPending}
+                    onClick={() => manualDialMut.mutate({
+                      campaignId: status.data?.campaign || campaign || '',
+                      phoneNumber: manualNumber,
+                      phoneCode: manualCode || '51',
+                      dialTimeout: 60,
+                      dialPrefix: '9',
+                      preview: 'NO',
+                    })}
+                  >
+                    Marcar
+                  </Button>
+                </Stack>
+              </Stack>
             )}
             {manualNext.isError && <Alert severity='error'>No fue posible ejecutar DIAL NEXT NUMBER en Vicidial.</Alert>}
             {manualNext.data?.ok && <Alert severity='success'>Marcación manual solicitada correctamente.</Alert>}
-            {mode === 'manual' && (
+            {manualDialMut.isError && <Alert severity='error'>No fue posible ejecutar MANUAL DIAL.</Alert>}
+            {manualDialMut.data?.ok && (
+              <Alert severity='success'>Llamada solicitada. Call ID: {manualDialMut.data?.callId || 'N/D'}.</Alert>
+            )}
+            {isManualFlow && (
               <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
                 <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'DIALONLY' })}>DIALONLY</Button>
                 <Button onClick={() => previewAction({ leadId, campaign: c?.lead?.campaign, action: 'SKIP' })}>SKIP</Button>

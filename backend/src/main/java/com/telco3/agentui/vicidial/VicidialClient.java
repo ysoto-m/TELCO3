@@ -45,6 +45,7 @@ import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 import java.util.stream.Collectors;
 
 @Component
@@ -185,6 +186,57 @@ public class VicidialClient {
         "agent_user", agentUser,
         "value", "MANUALNEXT"
     )));
+  }
+
+  public VicidialHttpResult manualDialNextCall(Map<String, String> params) {
+    var s = configService.resolve();
+    var payload = new LinkedHashMap<String, String>();
+    payload.putAll(params);
+    if (StringUtils.hasText(s.source()) && !payload.containsKey("source")) {
+      payload.put("source", s.source());
+    }
+    return executePost(s.baseUrl(), "/agc/vdc_db_query.php", payload);
+  }
+
+  public ManualDialOutcome evaluateManualDialBody(String body) {
+    String normalized = normalize(body);
+    if (containsLoginForm(body)
+        || normalized.contains("agent_user is not logged in")
+        || normalized.contains("not logged in")
+        || normalized.contains("re-login")) {
+      return ManualDialOutcome.RELOGIN_REQUIRED;
+    }
+    if (normalized.contains("invalid username/password") || normalized.contains("invalid user/pass")) {
+      return ManualDialOutcome.INVALID_CREDENTIALS;
+    }
+    if (normalized.contains("does not have permission") || normalized.contains("permission")) {
+      return ManualDialOutcome.PERMISSION_DENIED;
+    }
+    if (normalized.contains("error")) {
+      return ManualDialOutcome.FAILED;
+    }
+    if (normalized.contains("call_id") || normalized.contains("lead_id") || normalized.contains("success")) {
+      return ManualDialOutcome.SUCCESS;
+    }
+    return ManualDialOutcome.UNKNOWN;
+  }
+
+  public Map<String, String> parseKeyValueLines(String rawBody) {
+    Map<String, String> parsed = new LinkedHashMap<>();
+    String safeBody = Objects.toString(rawBody, "");
+    String[] lines = safeBody.split("\\r?\\n");
+    Pattern pattern = Pattern.compile("^\\s*([A-Za-z0-9_]+)\\s*[:=]\\s*(.*?)\\s*$");
+    for (String line : lines) {
+      Matcher matcher = pattern.matcher(line);
+      if (matcher.find()) {
+        parsed.put(matcher.group(1).toLowerCase(), matcher.group(2));
+      }
+    }
+    Matcher callIdMatcher = Pattern.compile("\\b(M[0-9]{6,})\\b").matcher(safeBody);
+    if (callIdMatcher.find()) {
+      parsed.putIfAbsent("call_id", callIdMatcher.group(1));
+    }
+    return parsed;
   }
 
   public String activeLead(String agent) {
@@ -681,6 +733,15 @@ public class VicidialClient {
   }
 
   public record ActiveLeadResult(ActiveLeadOutcome outcome, String rawBody, int httpStatus) {}
+
+  public enum ManualDialOutcome {
+    SUCCESS,
+    RELOGIN_REQUIRED,
+    INVALID_CREDENTIALS,
+    PERMISSION_DENIED,
+    FAILED,
+    UNKNOWN
+  }
 
   private record CookieSession(CookieStore cookieStore, Instant expiresAt) {
   }

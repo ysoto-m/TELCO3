@@ -146,6 +146,18 @@ class VicidialClientTest {
     assertEquals("VICIDIAL_UNREACHABLE", ex.code());
   }
 
+  @Test
+  void parseKeyValueLinesExtractsCallIdFromMultilineResponse() {
+    VicidialClient client = new VicidialClient(mock(VicidialConfigService.class), 4000, 4000, 4000, false);
+    String body = "status: SUCCESS\nlead_id: 12345\nrandom line\nM22423581234";
+
+    Map<String, String> parsed = client.parseKeyValueLines(body);
+
+    assertEquals("SUCCESS", parsed.get("status"));
+    assertEquals("12345", parsed.get("lead_id"));
+    assertEquals("M22423581234", parsed.get("call_id"));
+  }
+
   private Map<String, String> parseForm(String body) {
     Map<String, String> result = new LinkedHashMap<>();
     if (body == null || body.isBlank()) {

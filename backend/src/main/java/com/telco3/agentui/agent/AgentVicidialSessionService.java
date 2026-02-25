@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class AgentVicidialSessionService {
@@ -144,6 +146,16 @@ public class AgentVicidialSessionService {
     state.mode = mode;
     credentialService.saveLastSelection(agentUser, state.phoneLogin, campaignId, remember);
     credentialService.markConnected(agentUser, state.phoneLogin, campaignId);
+    RuntimeSessionFields runtime = extractRuntimeSessionFields(result.body());
+    credentialService.updateRuntimeSession(
+        agentUser,
+        runtime.sessionName(),
+        runtime.serverIp(),
+        runtime.confExten(),
+        runtime.extension(),
+        runtime.protocol(),
+        runtime.agentLogId()
+    );
 
     return Map.of(
         "ok", true,
@@ -232,5 +244,44 @@ public class AgentVicidialSessionService {
     String phoneLogin;
     String campaign;
     String mode;
+  }
+
+  private RuntimeSessionFields extractRuntimeSessionFields(String rawBody) {
+    String safeBody = Objects.toString(rawBody, "");
+    String sessionName = extractJsVar(safeBody, "session_name");
+    String serverIp = extractJsVar(safeBody, "server_ip");
+    String confExten = extractJsVar(safeBody, "conf_exten");
+    String extension = extractJsVar(safeBody, "extension");
+    String protocol = extractJsVar(safeBody, "protocol");
+    Long agentLogId = parseLong(extractJsVar(safeBody, "agent_log_id"));
+    return new RuntimeSessionFields(sessionName, serverIp, confExten, extension, protocol, agentLogId);
+  }
+
+  private String extractJsVar(String html, String field) {
+    Pattern quoted = Pattern.compile("(?:var\\s+)?" + Pattern.quote(field) + "\\s*=\\s*['\"]([^'\"]+)['\"]", Pattern.CASE_INSENSITIVE);
+    Matcher quotedMatcher = quoted.matcher(html);
+    if (quotedMatcher.find()) {
+      return quotedMatcher.group(1).trim();
+    }
+    Pattern unquoted = Pattern.compile("(?:var\\s+)?" + Pattern.quote(field) + "\\s*=\\s*([0-9]+)", Pattern.CASE_INSENSITIVE);
+    Matcher unquotedMatcher = unquoted.matcher(html);
+    if (unquotedMatcher.find()) {
+      return unquotedMatcher.group(1).trim();
+    }
+    return null;
+  }
+
+  private Long parseLong(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException ignored) {
+      return null;
+    }
+  }
+
+  private record RuntimeSessionFields(String sessionName, String serverIp, String confExten, String extension, String protocol, Long agentLogId) {
   }
 }

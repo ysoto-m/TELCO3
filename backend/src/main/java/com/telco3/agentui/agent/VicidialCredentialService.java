@@ -113,14 +113,44 @@ public class VicidialCredentialService {
     repo.save(entity);
   }
 
+  public void updateRuntimeSession(
+      String appUsername,
+      String sessionName,
+      String serverIp,
+      String confExten,
+      String extension,
+      String protocol,
+      Long agentLogId
+  ) {
+    var entity = getOrCreate(appUsername);
+    entity.sessionName = emptyToNull(sessionName);
+    entity.serverIp = emptyToNull(serverIp);
+    entity.confExten = emptyToNull(confExten);
+    entity.extension = emptyToNull(extension);
+    entity.protocol = emptyToNull(protocol);
+    entity.agentLogId = agentLogId;
+    entity.updatedAt = OffsetDateTime.now();
+    repo.save(entity);
+  }
+
   public void markDisconnected(String appUsername) {
     var entity = getOrCreate(appUsername);
     entity.connected = false;
     entity.connectedPhoneLogin = null;
     entity.connectedCampaign = null;
+    entity.sessionName = null;
+    entity.serverIp = null;
+    entity.confExten = null;
+    entity.extension = null;
+    entity.protocol = null;
+    entity.agentLogId = null;
     entity.connectedAt = null;
     entity.updatedAt = OffsetDateTime.now();
     repo.save(entity);
+  }
+
+  private String emptyToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 
   private AgentVicidialCredentialEntity getOrCreate(String appUsername) {
