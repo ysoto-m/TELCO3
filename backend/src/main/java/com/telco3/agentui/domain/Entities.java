@@ -58,6 +58,12 @@ public class Entities {
     public boolean connected;
     public String connectedPhoneLogin;
     public String connectedCampaign;
+    public String sessionName;
+    public String serverIp;
+    public String confExten;
+    public String extension;
+    public String protocol;
+    public Long agentLogId;
     public OffsetDateTime connectedAt;
     public OffsetDateTime updatedAt = OffsetDateTime.now();
   }
