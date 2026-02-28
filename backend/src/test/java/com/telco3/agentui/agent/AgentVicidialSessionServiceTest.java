@@ -7,6 +7,9 @@ import com.telco3.agentui.vicidial.VicidialService;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialSessionClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -14,7 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class AgentVicidialSessionServiceTest {
+
+  @Mock
+  private VicidialService vicidialService;
 
   @Test
   void listCampaignsReturns400WhenAgentCredentialsMissingOutsideDev() {
@@ -23,7 +30,6 @@ class AgentVicidialSessionServiceTest {
     VicidialCredentialService credentialService = mock(VicidialCredentialService.class);
     VicidialCampaignParser campaignParser = new VicidialCampaignParser();
     VicidialDiagnosticsService diagnosticsService = mock(VicidialDiagnosticsService.class);
-    VicidialService vicidialService = mock(VicidialService.class);
     Environment env = mock(Environment.class);
     when(env.getActiveProfiles()).thenReturn(new String[]{"prod"});
     when(env.getProperty(eq("APP_ENV"), anyString())).thenReturn("prod");
