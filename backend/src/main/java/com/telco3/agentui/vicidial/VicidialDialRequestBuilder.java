@@ -1,7 +1,6 @@
 package com.telco3.agentui.vicidial;
 
 import com.telco3.agentui.domain.Entities;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -21,11 +20,11 @@ public class VicidialDialRequestBuilder {
   public VicidialDialRequestBuilder(
       VicidialClient vicidialClient,
       VicidialCampaignParser campaignParser,
-      @Value("#{${app.vicidial.campaign-aliases:{}}}") Map<String, String> campaignAliases
+      VicidialDialProperties dialProperties
   ) {
     this.vicidialClient = vicidialClient;
     this.campaignParser = campaignParser;
-    this.campaignAliases = campaignAliases;
+    this.campaignAliases = dialProperties.getCampaignAliases();
   }
 
   public Map<String, String> buildDialNextPayload(
