@@ -5,12 +5,13 @@ import com.telco3.agentui.domain.Entities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 @Service
 public class VicidialService {
@@ -20,38 +21,48 @@ public class VicidialService {
   private final VicidialDialResponseParser dialResponseParser;
   private final VicidialCredentialService credentialService;
   private final Environment environment;
+  private final VicidialRuntimeDataSourceFactory dataSourceFactory;
 
-  public VicidialService(VicidialClient client, VicidialDialResponseParser dialResponseParser, VicidialCredentialService credentialService, Environment environment) {
+  public VicidialService(VicidialClient client, VicidialDialResponseParser dialResponseParser, VicidialCredentialService credentialService,
+                         Environment environment, VicidialRuntimeDataSourceFactory dataSourceFactory) {
     this.client = client;
     this.dialResponseParser = dialResponseParser;
     this.credentialService = credentialService;
     this.environment = environment;
+    this.dataSourceFactory = dataSourceFactory;
   }
 
   public String resolveModeForCampaign(String appUsername, String campaignId) {
-    VicidialClient.CampaignDialConfig config = client.campaignDialConfig(campaignId);
-    String mode = inferMode(config.dialMethod(), config.autoDialLevel());
+    String mode = campaignMode(campaignId).mode();
     credentialService.updateSessionMode(appUsername, mode);
     if (isDevEnvironment()) {
-      log.info("Vicidial campaign mode resolved agent={} campaign={} dialMethod={} autoDialLevel={} mode={}", appUsername, campaignId, config.dialMethod().orElse("N/A"), config.autoDialLevel().map(String::valueOf).orElse("N/A"), mode);
+      log.info("Vicidial campaign mode resolved agent={} campaign={} mode={}", appUsername, campaignId, mode);
     }
     return mode;
   }
 
-  private String inferMode(Optional<String> dialMethod, Optional<Double> autoDialLevel) {
-    if (autoDialLevel.isPresent() && autoDialLevel.get() > 0D) {
-      return "predictive";
+  public CampaignMode campaignMode(String campaignId) {
+    JdbcTemplate jdbc = new JdbcTemplate(dataSourceFactory.getOrCreate());
+    Map<String, Object> row = jdbc.query(
+        "SELECT campaign_id, dial_method FROM vicidial_campaigns WHERE campaign_id = ?",
+        rs -> rs.next() ? Map.of("campaign_id", rs.getString("campaign_id"), "dial_method", rs.getString("dial_method")) : null,
+        campaignId
+    );
+    if (row == null) {
+      throw new VicidialServiceException(org.springframework.http.HttpStatus.NOT_FOUND,
+          "VICIDIAL_CAMPAIGN_NOT_FOUND", "No se encontró la campaña en Vicidial.");
     }
-    return dialMethod.map(this::mapDialMethodToMode).orElse("predictive");
+    String dialMethodRaw = Objects.toString(row.get("dial_method"), "");
+    String mode = mapDialMethodToMode(dialMethodRaw);
+    return new CampaignMode(Objects.toString(row.get("campaign_id"), campaignId), dialMethodRaw, mode);
   }
 
   public String mapDialMethodToMode(String dialMethod) {
     String normalized = Objects.toString(dialMethod, "").trim().toUpperCase(Locale.ROOT);
-    return switch (normalized) {
-      case "MANUAL", "INBOUND_MAN" -> "manual";
-      case "ADAPT_PREDICTIVE", "PREDICTIVE" -> "predictive";
-      default -> "predictive";
-    };
+    if (normalized.contains("MANUAL")) {
+      return "manual";
+    }
+    return "predictive";
   }
 
   public DialNextResult dialNextWithLeadRetry(String agentUser, String rawBody, String callId, Long leadId) {
@@ -85,6 +96,13 @@ public class VicidialService {
     }
 
     var leadResult = client.activeLeadSafe(agentUser);
+    if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED) {
+      return ActiveLeadState.relogin(leadResult.statusCode(), leadResult.rawBody());
+    }
+    if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.NO_LEAD) {
+      credentialService.updateDialRuntime(agentUser, null, null, null);
+      return ActiveLeadState.none(leadResult.statusCode(), "NO_ACTIVE_LEAD", leadResult.rawBody());
+    }
     if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.SUCCESS) {
       Long leadId = extractLong(leadResult.rawBody(), "lead_id");
       if (leadId != null) {
@@ -93,7 +111,7 @@ public class VicidialService {
       }
     }
     credentialService.updateDialRuntime(agentUser, null, null, null);
-    return ActiveLeadState.none();
+    return ActiveLeadState.none(leadResult.statusCode(), "UNKNOWN", leadResult.rawBody());
   }
 
   private String extract(String raw, String key) {
@@ -123,19 +141,26 @@ public class VicidialService {
     return profileDev || "dev".equalsIgnoreCase(appEnv);
   }
 
+  public record CampaignMode(String campaignId, String dialMethodRaw, String mode) {}
+
   public record DialNextResult(String callId, Long leadId, String classification) {}
 
-  public record ActiveLeadState(boolean hasLead, boolean dialing, String callId, Long leadId, String phoneNumber, String campaign) {
+  public record ActiveLeadState(boolean hasLead, boolean dialing, boolean reloginRequired, String callId, Long leadId,
+                                String phoneNumber, String campaign, int httpStatus, String classification, String rawBody) {
     public static ActiveLeadState dialing(String callId) {
-      return new ActiveLeadState(false, true, callId, null, null, null);
+      return new ActiveLeadState(false, true, false, callId, null, null, null, 200, "DIALING", "");
     }
 
     public static ActiveLeadState ready(Long leadId, String phoneNumber, String campaign) {
-      return new ActiveLeadState(true, false, null, leadId, phoneNumber, campaign);
+      return new ActiveLeadState(true, false, false, null, leadId, phoneNumber, campaign, 200, "SUCCESS", "");
     }
 
-    public static ActiveLeadState none() {
-      return new ActiveLeadState(false, false, null, null, null, null);
+    public static ActiveLeadState none(int httpStatus, String classification, String rawBody) {
+      return new ActiveLeadState(false, false, false, null, null, null, null, httpStatus, classification, rawBody);
+    }
+
+    public static ActiveLeadState relogin(int httpStatus, String rawBody) {
+      return new ActiveLeadState(false, false, true, null, null, null, null, httpStatus, "RELOGIN_REQUIRED", rawBody);
     }
   }
 }

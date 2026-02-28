@@ -73,6 +73,11 @@ export default function AdminPage(){
           <TextField label='API User' value={(cfg||settings.data||{}).apiUser||''} onChange={e=>setCfg({...cfg,...settings.data,apiUser:e.target.value})}/>
           <TextField label='API Pass' type='password' onChange={e=>setCfg({...cfg,...settings.data,apiPass:e.target.value})}/>
           <TextField label='Source' value={(cfg||settings.data||{}).source||''} onChange={e=>setCfg({...cfg,...settings.data,source:e.target.value})}/>
+          <TextField label='DB Host' value={(cfg||settings.data||{}).dbHost||''} onChange={e=>setCfg({...cfg,...settings.data,dbHost:e.target.value})}/>
+          <TextField label='DB Port' value={(cfg||settings.data||{}).dbPort||''} onChange={e=>setCfg({...cfg,...settings.data,dbPort:e.target.value})}/>
+          <TextField label='DB Name' value={(cfg||settings.data||{}).dbName||''} onChange={e=>setCfg({...cfg,...settings.data,dbName:e.target.value})}/>
+          <TextField label='DB User' value={(cfg||settings.data||{}).dbUser||''} onChange={e=>setCfg({...cfg,...settings.data,dbUser:e.target.value})}/>
+          <TextField label='DB Pass' type='password' onChange={e=>setCfg({...cfg,...settings.data,dbPass:e.target.value})}/>
           <Button variant='contained' onClick={()=>updateSettings.mutate(cfg||settings.data)}>Guardar settings</Button>
         </Stack></CardContent></Card></Grid>
       </Grid>

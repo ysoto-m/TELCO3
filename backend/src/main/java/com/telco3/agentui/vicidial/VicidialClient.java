@@ -75,6 +75,7 @@ public class VicidialClient {
   }
 
   private VicidialHttpResult call(String path, Map<String, String> params) {
+    configService.assertVicidialApiConfigured();
     var s = configService.resolve();
     params.put("user", s.apiUser());
     params.put("pass", s.apiPass());
@@ -85,6 +86,7 @@ public class VicidialClient {
   }
 
   private VicidialHttpResult post(String path, Map<String, String> params) {
+    configService.assertVicidialApiConfigured();
     var s = configService.resolve();
     params.put("user", s.apiUser());
     params.put("pass", s.apiPass());
@@ -189,6 +191,7 @@ public class VicidialClient {
   }
 
   public VicidialHttpResult manualDialNextCall(Map<String, String> params) {
+    configService.assertVicidialApiConfigured();
     var s = configService.resolve();
     var payload = new LinkedHashMap<String, String>();
     payload.putAll(params);
@@ -285,6 +288,7 @@ public class VicidialClient {
   }
 
   public VicidialHttpResult campaignsForAgent(String agentUser, String agentPass) {
+    configService.assertVicidialApiConfigured();
     var s = configService.resolve();
     var params = new HashMap<String, String>();
     params.put("user", agentUser);
@@ -363,6 +367,7 @@ public class VicidialClient {
       Integer browserWidth,
       Integer browserHeight
   ) {
+    configService.assertVicidialApiConfigured();
     var s = configService.resolve();
     if (!StringUtils.hasText(s.baseUrl())) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,

@@ -20,7 +20,8 @@ public class SettingsController {
     this.configService = configService;
   }
 
-  public record SettingsReq(@NotBlank String baseUrl, @NotBlank String apiUser, @NotBlank String apiPass, String source) {
+  public record SettingsReq(@NotBlank String baseUrl, @NotBlank String apiUser, @NotBlank String apiPass, String source,
+                            String dbHost, String dbPort, String dbName, String dbUser, String dbPass) {
   }
 
   @GetMapping("/vicidial")
@@ -31,13 +32,20 @@ public class SettingsController {
     response.put("apiUser", n(s.apiUser()));
     response.put("apiPass", s.apiPassMasked());
     response.put("source", n(s.source()));
+    response.put("dbHost", n(s.dbHost()));
+    response.put("dbPort", n(s.dbPort()));
+    response.put("dbName", n(s.dbName()));
+    response.put("dbUser", n(s.dbUser()));
+    response.put("dbPass", s.dbPassMasked());
     response.put("updatedAt", s.updatedAt());
     return response;
   }
 
   @PutMapping("/vicidial")
   public Map<String, Object> put(@RequestBody SettingsReq req) {
-    configService.saveConfig(new VicidialConfigService.VicidialConfigUpdateRequest(req.baseUrl(), req.apiUser(), req.apiPass(), req.source()));
+    configService.saveConfig(new VicidialConfigService.VicidialConfigUpdateRequest(
+        req.baseUrl(), req.apiUser(), req.apiPass(), req.source(), req.dbHost(), req.dbPort(), req.dbName(), req.dbUser(), req.dbPass()
+    ));
     return Map.of("ok", true);
   }
 

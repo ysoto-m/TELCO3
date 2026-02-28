@@ -27,6 +27,7 @@ import {
   manualDial,
   getVicidialCampaigns,
   getVicidialStatus,
+  getCampaignDetails,
   pauseAction,
   previewAction,
   retryInteraction,
@@ -74,13 +75,21 @@ export default function AgentPage() {
 
   const leadId = Number(active.data?.lead?.leadId || active.data?.leadId || 0) || undefined;
 
+
+  const selectedCampaign = status.data?.campaign || campaign;
+  const campaignDetails = useQuery({
+    queryKey: ['campaign-details', selectedCampaign],
+    queryFn: () => getCampaignDetails(selectedCampaign || ""),
+    enabled: Boolean(selectedCampaign),
+  });
+
   const context = useQuery({
     queryKey: ['context', leadId],
     queryFn: () => getContext({ leadId }),
     enabled: Boolean(status.data?.campaign),
   });
 
-  const mode = (context.data?.mode || 'predictive') as 'predictive' | 'manual';
+  const mode = (campaignDetails.data?.campaign?.mode || context.data?.mode || 'predictive') as 'predictive' | 'manual';
   const isManualFlow = mode === 'manual';
 
   const connectPhone = useMutation({
@@ -460,6 +469,9 @@ export default function AgentPage() {
             )}
 
             {manualNext.data?.ok && !dialingBanner && <Alert severity='success'>Marcación manual solicitada correctamente.</Alert>}
+            {manualNext.error && (manualNext.error as any)?.response?.data?.code === 'VICIDIAL_NO_LEADS' && (
+              <Alert severity='warning'>No hay leads en hopper para esta campaña. No se reintentará automáticamente.</Alert>
+            )}
             {dialingBanner && <Alert severity='info'>Marcando...</Alert>}
             {manualDialMut.isError && <Alert severity='error'>No fue posible ejecutar MANUAL DIAL.</Alert>}
             {manualDialMut.data?.ok && (
