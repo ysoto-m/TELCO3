@@ -4,9 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telco3.agentui.domain.*;
 import com.telco3.agentui.domain.Entities.*;
 import com.telco3.agentui.vicidial.VicidialClient;
+import com.telco3.agentui.vicidial.VicidialDialRequestBuilder;
+import com.telco3.agentui.vicidial.VicidialDialResponseParser;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -24,6 +27,9 @@ public class AgentController {
   private final AgentVicidialSessionService vicidialSessionService;
   private final UserRepository userRepository;
   private final AgentVicidialCredentialRepository agentVicidialCredentialRepository;
+  private final VicidialDialRequestBuilder dialRequestBuilder;
+  private final VicidialDialResponseParser dialResponseParser;
+  private final Environment environment;
   private final boolean vicidialDebug;
   private final ObjectMapper mapper = new ObjectMapper();
 
@@ -36,6 +42,9 @@ public class AgentController {
       AgentVicidialSessionService vicidialSessionService,
       UserRepository userRepository,
       AgentVicidialCredentialRepository agentVicidialCredentialRepository,
+      VicidialDialRequestBuilder dialRequestBuilder,
+      VicidialDialResponseParser dialResponseParser,
+      Environment environment,
       @Value("${app.vicidial.debug:false}") boolean vicidialDebug
   ){
     this.vicidial=vicidial;
@@ -46,6 +55,9 @@ public class AgentController {
     this.vicidialSessionService = vicidialSessionService;
     this.userRepository = userRepository;
     this.agentVicidialCredentialRepository = agentVicidialCredentialRepository;
+    this.dialRequestBuilder = dialRequestBuilder;
+    this.dialResponseParser = dialResponseParser;
+    this.environment = environment;
     this.vicidialDebug = vicidialDebug;
   }
 
@@ -135,7 +147,7 @@ public class AgentController {
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", true);
     response.put("lead", lead);
-    if (vicidialDebug) {
+    if (debugAllowed()) {
       response.put("rawSnippet", rawSnippet);
     }
     return response;
@@ -146,49 +158,30 @@ public class AgentController {
     String agentUser = requireAuth(auth);
     ensureAgentExists(agentUser);
     var session = requireConnectedSession(agentUser);
-    requireSessionField(session.connectedPhoneLogin, "phone_login");
-    requireSessionField(session.connectedCampaign, "campaign");
+    String agentPass = credentialService.resolveAgentPass(agentUser)
+        .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
+            "VICIDIAL_AGENT_CREDENTIALS_MISSING",
+            "No existe agent_pass configurado para el agente.",
+            "Actualice users.agent_pass_encrypted antes de usar marcación manual.",
+            null));
 
-    var result = vicidial.externalDialManualNext(agentUser);
+    Map<String, String> payload = dialRequestBuilder.buildDialNextPayload(agentUser, agentPass, session, req.campaignId());
+    var result = vicidial.manualDialNextCall(payload);
     String raw = Objects.toString(result.body(), "");
-    String normalized = raw.toUpperCase(Locale.ROOT);
     String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
+    var parsed = dialResponseParser.parse(raw);
 
-    if (normalized.contains("ERROR: AGENT_USER IS NOT LOGGED IN") || normalized.contains("RE-LOGIN")) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT,
-          "VICIDIAL_RELOGIN_REQUIRED",
-          "La sesión de Vicidial requiere re-login.",
-          "Conecte anexo/campaña nuevamente para continuar.",
-          buildManualNextDetails(result.statusCode(), rawSnippet, agentUser));
-    }
-    if (normalized.contains("ERROR: AUTH USER DOES NOT HAVE PERMISSION")) {
-      throw new VicidialServiceException(HttpStatus.FORBIDDEN,
-          "VICIDIAL_PERMISSION_DENIED",
-          "El usuario API de Vicidial no tiene permisos para external_dial.",
-          "Habilite permisos AGENT API (external_dial) para el API user en Vicidial.",
-          buildManualNextDetails(result.statusCode(), rawSnippet, agentUser));
-    }
-    if (normalized.contains("NO LEADS IN THE HOPPER")) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT,
-          "VICIDIAL_NO_LEADS",
-          "No hay leads disponibles en el hopper para este agente.",
-          "Evite reintentos automáticos agresivos; cargue leads o revise filtros.",
-          buildManualNextDetails(result.statusCode(), rawSnippet, agentUser));
-    }
-    if (!normalized.contains("SUCCESS")) {
-      throw new VicidialServiceException(HttpStatus.BAD_GATEWAY,
-          "VICIDIAL_MANUAL_NEXT_FAILED",
-          "Vicidial no confirmó la marcación manual siguiente.",
-          "Revise la sesión del agente y permisos AGENT API en Vicidial.",
-          buildManualNextDetails(result.statusCode(), rawSnippet, agentUser));
+    if (!parsed.success()) {
+      throw dialBusinessException("VICIDIAL_MANUAL_NEXT_FAILED", result.statusCode(), parsed.classification(), rawSnippet, payload,
+          "Vicidial no confirmó la marcación manual siguiente.");
     }
 
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", true);
-    response.put("result", Map.of("code", "VICIDIAL_DIAL_NEXT_OK", "campaign", req.campaignId(), "mode", Objects.toString(req.mode(), "manual")));
-    if (vicidialDebug) {
-      response.put("rawSnippet", rawSnippet);
-    }
+    response.put("result", Map.of("code", "VICIDIAL_DIAL_NEXT_OK", "campaign", payload.get("campaign"), "mode", Objects.toString(req.mode(), "manual")));
+    response.put("callId", parsed.callId());
+    response.put("leadId", parsed.leadId());
+    maybeAttachDebug(response, payload, rawSnippet);
     return response;
   }
 
@@ -203,92 +196,33 @@ public class AgentController {
     ensureAgentExists(agentUser);
     var session = requireConnectedSession(agentUser);
     String agentPass = credentialService.resolveAgentPass(agentUser)
-        .orElseThrow(() -> new VicidialServiceException(HttpStatus.BAD_REQUEST,
+        .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
             "VICIDIAL_AGENT_CREDENTIALS_MISSING",
             "No existe agent_pass configurado para el agente.",
             "Actualice users.agent_pass_encrypted antes de usar marcación manual.",
             null));
 
-    Map<String, String> missing = new LinkedHashMap<>();
-    captureMissing(missing, "phone_login", session.connectedPhoneLogin);
-    captureMissing(missing, "campaign", session.connectedCampaign);
-    captureMissing(missing, "session_name", session.sessionName);
-    captureMissing(missing, "server_ip", session.serverIp);
-    if (session.agentLogId == null) {
-      missing.put("agent_log_id", "required");
-    }
-    if (!missing.isEmpty()) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT,
-          "VICIDIAL_SESSION_INCOMPLETE",
-          "La sesión Vicidial está incompleta para marcación manual.",
-          "Vuelva a conectar campaña para refrescar session_name/server_ip/agent_log_id.",
-          Map.of("missing", missing.keySet()));
-    }
-
-    String phoneCode = defaultIfBlank(req.phoneCode(), "51");
-    String dialPrefix = defaultIfBlank(req.dialPrefix(), "9");
-    int dialTimeout = req.dialTimeout() == null || req.dialTimeout() <= 0 ? 60 : req.dialTimeout();
-    String preview = "YES".equalsIgnoreCase(req.preview()) ? "YES" : "NO";
-
-    LinkedHashMap<String, String> payload = new LinkedHashMap<>();
-    payload.put("ACTION", "manDiaLnextCaLL");
-    payload.put("server_ip", session.serverIp);
-    payload.put("session_name", session.sessionName);
-    payload.put("user", agentUser);
-    payload.put("pass", agentPass);
-    payload.put("campaign", defaultIfBlank(req.campaignId(), session.connectedCampaign));
-    payload.put("conf_exten", defaultIfBlank(session.confExten, session.connectedPhoneLogin));
-    payload.put("exten", session.connectedPhoneLogin);
-    payload.put("phone_login", session.connectedPhoneLogin);
-    payload.put("agent_log_id", String.valueOf(session.agentLogId));
-    payload.put("phone_code", phoneCode);
-    payload.put("phone_number", req.phoneNumber());
-    payload.put("dial_timeout", String.valueOf(dialTimeout));
-    payload.put("dial_prefix", dialPrefix);
-    payload.put("preview", preview);
-    payload.put("list_id", "");
-    payload.put("channel", buildChannel(session));
+    var overrides = new VicidialDialRequestBuilder.ManualDialOverrides(req.phoneNumber(), req.phoneCode(), req.dialTimeout(), req.dialPrefix());
+    LinkedHashMap<String, String> payload = new LinkedHashMap<>(dialRequestBuilder.buildManualDialPayload(agentUser, agentPass, session, req.campaignId(), overrides));
+    payload.put("preview", "YES".equalsIgnoreCase(req.preview()) ? "YES" : "NO");
 
     var result = vicidial.manualDialNextCall(payload);
     String raw = Objects.toString(result.body(), "");
     String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
-    VicidialClient.ManualDialOutcome outcome = vicidial.evaluateManualDialBody(raw);
+    var parsedResponse = dialResponseParser.parse(raw);
 
-    if (outcome == VicidialClient.ManualDialOutcome.RELOGIN_REQUIRED) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_RELOGIN_REQUIRED",
-          "La sesión de Vicidial requiere re-login.",
-          "Conecte anexo/campaña nuevamente para continuar.",
-          buildManualDialDetails(result.statusCode(), rawSnippet, payload));
-    }
-    if (outcome == VicidialClient.ManualDialOutcome.INVALID_CREDENTIALS) {
-      throw new VicidialServiceException(HttpStatus.BAD_REQUEST, "VICIDIAL_INVALID_CREDENTIALS",
-          "Vicidial rechazó las credenciales de agente para la marcación manual.",
-          "Verifique usuario/agent_pass del agente.",
-          buildManualDialDetails(result.statusCode(), rawSnippet, payload));
-    }
-    if (outcome == VicidialClient.ManualDialOutcome.PERMISSION_DENIED) {
-      throw new VicidialServiceException(HttpStatus.FORBIDDEN, "VICIDIAL_PERMISSION_DENIED",
-          "Vicidial denegó permisos para marcación manual.",
-          "Revise user_level/user_group y permisos de campaña para manual dial.",
-          buildManualDialDetails(result.statusCode(), rawSnippet, payload));
-    }
-    if (outcome == VicidialClient.ManualDialOutcome.FAILED || outcome == VicidialClient.ManualDialOutcome.UNKNOWN) {
-      throw new VicidialServiceException(HttpStatus.BAD_GATEWAY, "VICIDIAL_MANUAL_DIAL_FAILED",
-          "Vicidial no confirmó la marcación manual.",
-          "Valide parámetros de sesión (session_name/server_ip/agent_log_id) y estado del agente.",
-          buildManualDialDetails(result.statusCode(), rawSnippet, payload));
+    if (!parsedResponse.success()) {
+      throw dialBusinessException("VICIDIAL_MANUAL_DIAL_FAILED", result.statusCode(), parsedResponse.classification(), rawSnippet, payload,
+          "Vicidial no confirmó la marcación manual.");
     }
 
     Map<String, String> parsed = vicidial.parseKeyValueLines(raw);
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", true);
-    response.put("callId", firstPresent(parsed, "call_id", "callid", "callerid"));
-    response.put("leadId", toLong(firstPresent(parsed, "lead_id", "leadid")));
+    response.put("callId", parsedResponse.callId() == null ? firstPresent(parsed, "call_id", "callid", "callerid") : parsedResponse.callId());
+    response.put("leadId", parsedResponse.leadId() == null ? toLong(firstPresent(parsed, "lead_id", "leadid")) : parsedResponse.leadId());
     response.put("status", firstPresent(parsed, "status", "result"));
-    if (vicidialDebug) {
-      response.put("rawSnippet", rawSnippet);
-      response.put("details", Map.of("debugRequest", maskPayload(payload)));
-    }
+    maybeAttachDebug(response, payload, rawSnippet);
     return response;
   }
 
@@ -455,26 +389,6 @@ public class AgentController {
     }
   }
 
-  private void captureMissing(Map<String, String> missing, String field, String value) {
-    if (value == null || value.isBlank()) {
-      missing.put(field, "required");
-    }
-  }
-
-  private String defaultIfBlank(String value, String fallback) {
-    return value == null || value.isBlank() ? fallback : value;
-  }
-
-  private String buildChannel(Entities.AgentVicidialCredentialEntity session) {
-    if (session.extension != null && !session.extension.isBlank()) {
-      return session.extension;
-    }
-    if (session.protocol != null && !session.protocol.isBlank() && session.confExten != null && !session.confExten.isBlank()) {
-      return session.protocol + "/" + session.confExten;
-    }
-    return "";
-  }
-
   private Long toLong(String value) {
     try {
       return value == null || value.isBlank() ? null : Long.parseLong(value.trim());
@@ -491,22 +405,6 @@ public class AgentController {
       }
     }
     return null;
-  }
-
-  private Map<String, Object> maskPayload(Map<String, String> payload) {
-    Map<String, Object> masked = new LinkedHashMap<>();
-    payload.forEach((key, value) -> masked.put(key, key.toLowerCase(Locale.ROOT).contains("pass") ? "***" : value));
-    return masked;
-  }
-
-  private Map<String, Object> buildManualDialDetails(int httpStatus, String rawSnippet, Map<String, String> payload) {
-    Map<String, Object> details = new LinkedHashMap<>();
-    details.put("httpStatus", httpStatus);
-    if (vicidialDebug) {
-      details.put("rawSnippet", rawSnippet);
-      details.put("debugRequest", maskPayload(payload));
-    }
-    return details;
   }
 
   private Map<String, Object> contextPayload(String mode, String campaign, String phoneLogin, String agentUser) {
@@ -532,7 +430,7 @@ public class AgentController {
     Map<String, Object> details = new LinkedHashMap<>();
     details.put("classification", classification);
     details.put("httpStatus", httpStatus);
-    if (vicidialDebug) {
+    if (debugAllowed()) {
       details.put("rawSnippet", rawSnippet);
       details.put("debugRequest", Map.of(
           "endpoint", "/agc/api.php",
@@ -543,21 +441,62 @@ public class AgentController {
     return details;
   }
 
-  private Map<String, Object> buildManualNextDetails(int httpStatus, String rawSnippet, String agentUser) {
+  private VicidialServiceException dialBusinessException(String code, int httpStatus, VicidialDialResponseParser.DialClassification classification, String rawSnippet, Map<String, String> payload, String defaultMessage) {
+    HttpStatus status = switch (classification) {
+      case RELOGIN_REQUIRED, INVALID_SESSION -> HttpStatus.UNAUTHORIZED;
+      case NO_LEADS -> HttpStatus.CONFLICT;
+      case INVALID_PARAMS -> HttpStatus.UNPROCESSABLE_ENTITY;
+      case UNKNOWN -> HttpStatus.CONFLICT;
+      case SUCCESS -> HttpStatus.OK;
+    };
+    String responseCode = switch (classification) {
+      case RELOGIN_REQUIRED, INVALID_SESSION -> "VICIDIAL_RELOGIN_REQUIRED";
+      case NO_LEADS -> "VICIDIAL_NO_LEADS";
+      case INVALID_PARAMS -> "VICIDIAL_INVALID_PARAMS";
+      default -> code;
+    };
+    String hint = switch (classification) {
+      case RELOGIN_REQUIRED, INVALID_SESSION -> "Conecte anexo/campaña nuevamente para continuar.";
+      case NO_LEADS -> "No hay leads disponibles en el hopper para este agente.";
+      case INVALID_PARAMS -> "Revise los parámetros enviados para marcación manual.";
+      default -> "Valide parámetros de sesión (session_name/server_ip/agent_log_id) y estado del agente.";
+    };
     Map<String, Object> details = new LinkedHashMap<>();
     details.put("httpStatus", httpStatus);
-    if (vicidialDebug) {
+    details.put("classification", classification.name());
+    if (debugAllowed()) {
       details.put("rawSnippet", rawSnippet);
-      details.put("debugRequest", Map.of(
-          "endpoint", "/agc/api.php",
-          "function", "external_dial",
-          "value", "MANUALNEXT",
-          "agentUser", agentUser,
-          "source", "***",
-          "user", "***",
-          "pass", "***"
-      ));
+      details.put("debugRequest", maskedUrlEncodedPayload(payload));
     }
-    return details;
+    return new VicidialServiceException(status, responseCode, defaultMessage, hint, details);
+  }
+
+  private void maybeAttachDebug(Map<String, Object> response, Map<String, String> payload, String rawSnippet) {
+    if (!debugAllowed()) {
+      return;
+    }
+    response.put("details", Map.of(
+        "debugRequest", maskedUrlEncodedPayload(payload),
+        "rawSnippet", rawSnippet
+    ));
+  }
+
+  private String maskedUrlEncodedPayload(Map<String, String> payload) {
+    return payload.entrySet().stream()
+        .map(e -> e.getKey() + "=" + urlEncode(e.getKey().toLowerCase(Locale.ROOT).contains("pass") ? "***" : Objects.toString(e.getValue(), "")))
+        .reduce((a, b) -> a + "&" + b)
+        .orElse("");
+  }
+
+  private String urlEncode(String value) {
+    return java.net.URLEncoder.encode(Objects.toString(value, ""), java.nio.charset.StandardCharsets.UTF_8);
+  }
+
+  private boolean debugAllowed() {
+    if (!vicidialDebug) {
+      return false;
+    }
+    return Arrays.stream(environment.getActiveProfiles()).noneMatch("prod"::equalsIgnoreCase)
+        && !"prod".equalsIgnoreCase(environment.getProperty("APP_ENV", environment.getProperty("app.env", "")));
   }
 }
