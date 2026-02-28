@@ -19,6 +19,16 @@ class VicidialDialResponseParserTest {
   }
 
   @Test
+  void parseSuccessWithoutLeadId() {
+    String raw = "M251231123456789\nstatus: SENT";
+    var result = parser.parse(raw);
+    assertTrue(result.success());
+    assertEquals(VicidialDialResponseParser.DialClassification.SUCCESS, result.classification());
+    assertEquals("M251231123456789", result.callId());
+    assertNull(result.leadId());
+  }
+
+  @Test
   void parseReloginFromHtmlLoginPage() {
     String raw = "<html><body><form><input name=\"VD_login\"/></form>Please login</body></html>";
     var result = parser.parse(raw);

@@ -5,6 +5,7 @@ import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialDialRequestBuilder;
 import com.telco3.agentui.vicidial.VicidialDialResponseParser;
 import com.telco3.agentui.vicidial.VicidialServiceException;
+import com.telco3.agentui.vicidial.VicidialService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -60,6 +61,9 @@ class AgentVicidialStatusControllerTest {
 
   @MockBean
   private VicidialDialResponseParser vicidialDialResponseParser;
+
+  @MockBean
+  private VicidialService vicidialService;
 
   @Test
   @WithMockUser(username = "agent1")
@@ -141,8 +145,8 @@ class AgentVicidialStatusControllerTest {
 
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
-    when(vicidialClient.activeLeadSafe("agent1"))
-        .thenReturn(new VicidialClient.ActiveLeadResult(VicidialClient.ActiveLeadOutcome.NO_ACTIVE_LEAD, "No active lead", 200));
+    when(vicidialService.classifyActiveLead(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(VicidialService.ActiveLeadState.none());
 
     mockMvc.perform(get("/api/agent/active-lead"))
         .andExpect(status().isOk())
@@ -152,7 +156,7 @@ class AgentVicidialStatusControllerTest {
 
   @Test
   @WithMockUser(username = "agent1")
-  void activeLeadWhenVicidialReturnsLoginPageRequiresRelogin() throws Exception {
+  void activeLeadWhenDialingReturnsVicidialDialing() throws Exception {
     var user = new com.telco3.agentui.domain.Entities.UserEntity();
     user.username = "agent1";
     var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
@@ -162,12 +166,12 @@ class AgentVicidialStatusControllerTest {
 
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
-    when(vicidialClient.activeLeadSafe("agent1"))
-        .thenReturn(new VicidialClient.ActiveLeadResult(VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED, "<html>login</html>", 200));
+    when(vicidialService.classifyActiveLead(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(VicidialService.ActiveLeadState.dialing("M123"));
 
     mockMvc.perform(get("/api/agent/active-lead"))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("VICIDIAL_RELOGIN_REQUIRED"));
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_DIALING"));
   }
 
   @Test
@@ -310,7 +314,7 @@ class AgentVicidialStatusControllerTest {
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
 
-    mockMvc.perform(get("/api/agent/context").param("mode", "predictive"))
+    mockMvc.perform(get("/api/agent/context"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("VICIDIAL_NOT_CONNECTED"));
   }

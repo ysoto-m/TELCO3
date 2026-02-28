@@ -5,6 +5,7 @@ import com.telco3.agentui.vicidial.VicidialCampaignParser;
 import com.telco3.agentui.vicidial.VicidialDiagnosticsService;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialSessionClient;
+import com.telco3.agentui.vicidial.VicidialService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -26,15 +27,17 @@ public class AgentVicidialSessionService {
   private final VicidialCampaignParser campaignParser;
   private final VicidialDiagnosticsService diagnosticsService;
   private final Environment environment;
+  private final VicidialService vicidialService;
   private final Map<String, AgentVicidialState> stateByAgent = new ConcurrentHashMap<>();
 
-  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService, VicidialCampaignParser campaignParser, VicidialDiagnosticsService diagnosticsService, Environment environment) {
+  public AgentVicidialSessionService(VicidialSessionClient sessionClient, VicidialClient vicidialClient, VicidialCredentialService credentialService, VicidialCampaignParser campaignParser, VicidialDiagnosticsService diagnosticsService, Environment environment, VicidialService vicidialService) {
     this.sessionClient = sessionClient;
     this.vicidialClient = vicidialClient;
     this.credentialService = credentialService;
     this.campaignParser = campaignParser;
     this.diagnosticsService = diagnosticsService;
     this.environment = environment;
+    this.vicidialService = vicidialService;
   }
 
   public Map<String, Object> connectPhone(String agentUser, String phoneLogin) {
@@ -124,7 +127,7 @@ public class AgentVicidialSessionService {
     return response;
   }
 
-  public Map<String, Object> connectCampaign(String agentUser, String campaignId, String mode, boolean remember) {
+  public Map<String, Object> connectCampaign(String agentUser, String campaignId, boolean remember) {
     AgentVicidialState state = requirePhoneConnected(agentUser);
 
     String agentPass = credentialService.resolveAgentPass(agentUser)
@@ -142,10 +145,11 @@ public class AgentVicidialSessionService {
     long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
     debugConnectCall(agentUser, state.phoneLogin, campaignId, result.statusCode(), elapsedMs, result.snippet());
 
+    String mode = vicidialService.resolveModeForCampaign(agentUser, campaignId);
     state.campaign = campaignId;
     state.mode = mode;
     credentialService.saveLastSelection(agentUser, state.phoneLogin, campaignId, remember);
-    credentialService.markConnected(agentUser, state.phoneLogin, campaignId);
+    credentialService.markConnected(agentUser, state.phoneLogin, campaignId, mode);
     RuntimeSessionFields runtime = extractRuntimeSessionFields(result.body());
     credentialService.updateRuntimeSession(
         agentUser,

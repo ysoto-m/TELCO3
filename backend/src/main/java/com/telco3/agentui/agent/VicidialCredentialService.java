@@ -103,11 +103,15 @@ public class VicidialCredentialService {
     repo.save(entity);
   }
 
-  public void markConnected(String appUsername, String phoneLogin, String campaign) {
+  public void markConnected(String appUsername, String phoneLogin, String campaign, String mode) {
     var entity = getOrCreate(appUsername);
     entity.connected = true;
     entity.connectedPhoneLogin = phoneLogin;
     entity.connectedCampaign = campaign;
+    entity.connectedMode = emptyToNull(mode);
+    entity.currentDialStatus = null;
+    entity.currentCallId = null;
+    entity.currentLeadId = null;
     entity.connectedAt = OffsetDateTime.now();
     entity.updatedAt = OffsetDateTime.now();
     repo.save(entity);
@@ -133,11 +137,33 @@ public class VicidialCredentialService {
     repo.save(entity);
   }
 
+
+
+  public void updateSessionMode(String appUsername, String mode) {
+    var entity = getOrCreate(appUsername);
+    entity.connectedMode = emptyToNull(mode);
+    entity.updatedAt = OffsetDateTime.now();
+    repo.save(entity);
+  }
+
+  public void updateDialRuntime(String appUsername, String dialStatus, String callId, Long leadId) {
+    var entity = getOrCreate(appUsername);
+    entity.currentDialStatus = emptyToNull(dialStatus);
+    entity.currentCallId = emptyToNull(callId);
+    entity.currentLeadId = leadId;
+    entity.updatedAt = OffsetDateTime.now();
+    repo.save(entity);
+  }
+
   public void markDisconnected(String appUsername) {
     var entity = getOrCreate(appUsername);
     entity.connected = false;
     entity.connectedPhoneLogin = null;
     entity.connectedCampaign = null;
+    entity.connectedMode = null;
+    entity.currentDialStatus = null;
+    entity.currentCallId = null;
+    entity.currentLeadId = null;
     entity.sessionName = null;
     entity.serverIp = null;
     entity.confExten = null;
