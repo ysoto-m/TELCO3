@@ -27,6 +27,7 @@ app:
     allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173}
   vicidial:
     debug: ${APP_VICIDIAL_DEBUG:false}
+    campaign-aliases: {}
 vicidial:
   http:
     connect-timeout-ms: ${VICIDIAL_HTTP_CONNECT_TIMEOUT_MS:4000}
