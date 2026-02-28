@@ -10,12 +10,12 @@ export const updateAgentProfilePass = (payload:{agentPass:string})=>api.put('/ap
 export const connectVicidialPhone = (payload:{phoneLogin:string})=>api.post('/api/agent/vicidial/phone/connect',payload).then(r=>r.data);
 export const disconnectVicidialPhone = ()=>api.post('/api/agent/vicidial/phone/disconnect').then(r=>r.data);
 export const getVicidialCampaigns = ()=>api.get('/api/agent/vicidial/campaigns').then(r=>r.data);
-export const connectVicidialCampaign = (payload:{campaignId:string;mode?:'predictive'|'manual';rememberCredentials?:boolean})=>api.post('/api/agent/vicidial/campaign/connect',payload).then(r=>r.data);
+export const connectVicidialCampaign = (payload:{campaignId:string;rememberCredentials?:boolean})=>api.post('/api/agent/vicidial/campaign/connect',payload).then(r=>r.data);
 export const getVicidialStatus = ()=>api.get('/api/agent/vicidial/status').then(r=>r.data);
 
 export const getActiveLead = ()=>api.get('/api/agent/active-lead').then(r=>r.data);
-export const getContext = (p:any)=>api.get('/api/agent/context',{params:p}).then(r=>r.data);
-export const dialNext = (payload:{campaignId:string;mode?:'predictive'|'manual'})=>api.post('/api/agent/vicidial/dial/next',payload).then(r=>r.data);
+export const getContext = (p:{leadId?:number})=>api.get('/api/agent/context',{params:p}).then(r=>r.data);
+export const dialNext = (payload:{campaignId:string})=>api.post('/api/agent/vicidial/dial/next',payload).then(r=>r.data);
 export const manualDial = (payload:{campaignId:string;phoneNumber:string;phoneCode?:string;dialTimeout?:number;dialPrefix?:string;preview?:'NO'|'YES'})=>api.post('/api/agent/vicidial/dial/manual',payload).then(r=>r.data);
 export const saveInteraction = (payload:any)=>api.post('/api/agent/interactions',payload).then(r=>r.data);
 export const retryInteraction = (id:number)=>api.post(`/api/agent/interactions/${id}/retry-vicidial`).then(r=>r.data);

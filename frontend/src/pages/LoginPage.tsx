@@ -35,7 +35,7 @@ export default function LoginPage() {
                 const r = await login(values);
                 localStorage.setItem('token', r.accessToken);
                 localStorage.setItem('role', r.role);
-                nav(r.role === 'REPORT_ADMIN' ? '/admin' : `/agent?mode=predictive&agent_user=${r.username}`);
+                nav(r.role === 'REPORT_ADMIN' ? '/admin' : `/agent?agent_user=${r.username}`);
               } catch {
                 setErrorMsg('No se pudo iniciar sesión. Verifica tus credenciales.');
               }
@@ -44,9 +44,6 @@ export default function LoginPage() {
             <AuthStepper activeStep={1} labels={['Login', 'Extensión', 'Campaña']} />
             <Typography variant='h4' fontWeight={800}>
               Iniciar sesión
-            </Typography>
-            <Typography variant='body2' color='text.secondary'>
-              Usa tus credenciales actuales. No se modificó el flujo de autenticación.
             </Typography>
 
             {errorMsg && <Alert severity='error'>{errorMsg}</Alert>}

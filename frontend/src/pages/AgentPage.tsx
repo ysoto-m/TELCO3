@@ -15,7 +15,7 @@ import {
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   connectVicidialCampaign,
   dialNext,
@@ -37,10 +37,8 @@ import AuthStepper from '../components/ui/AuthStepper';
 import ViciCard from '../components/ui/ViciCard';
 
 export default function AgentPage() {
-  const [sp] = useSearchParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const mode = (sp.get('mode') || 'predictive') as 'predictive' | 'manual';
   const [dispo, setDispo] = useState('');
   const [notes, setNotes] = useState('');
   const [phoneLogin, setPhoneLogin] = useState('');
@@ -50,6 +48,7 @@ export default function AgentPage() {
   const [agentPass, setAgentPass] = useState('');
   const [manualNumber, setManualNumber] = useState('');
   const [manualCode, setManualCode] = useState('51');
+  const [dialingBanner, setDialingBanner] = useState(false);
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -66,28 +65,23 @@ export default function AgentPage() {
     enabled: Boolean(status.data?.phoneConnected),
   });
 
-  const campaignHint = status.data?.campaign || campaign || '';
-  const manualByCampaign = /manual/i.test(campaignHint);
-  const isManualFlow = mode === 'manual' || manualByCampaign;
-
   const active = useQuery({
     queryKey: ['active-lead'],
     queryFn: getActiveLead,
     enabled: Boolean(status.data?.campaign),
-    refetchInterval: isManualFlow ? false : 7000,
+    refetchInterval: status.data?.mode === 'manual' ? false : 7000,
   });
 
-  const leadId = Number(sp.get('lead_id') || active.data?.leadId || 0) || undefined;
+  const leadId = Number(active.data?.lead?.leadId || active.data?.leadId || 0) || undefined;
 
   const context = useQuery({
-    queryKey: ['context', leadId, mode],
-    queryFn: () =>
-      getContext({
-        leadId,
-        mode,
-      }),
+    queryKey: ['context', leadId],
+    queryFn: () => getContext({ leadId }),
     enabled: Boolean(status.data?.campaign),
   });
+
+  const mode = (context.data?.mode || status.data?.mode || 'predictive') as 'predictive' | 'manual';
+  const isManualFlow = mode === 'manual';
 
   const connectPhone = useMutation({
     mutationFn: connectVicidialPhone,
@@ -143,6 +137,28 @@ export default function AgentPage() {
   const retry = useMutation({ mutationFn: retryInteraction });
 
   const c: any = context.data;
+
+
+  useEffect(() => {
+    if (active.data?.code === 'VICIDIAL_DIALING') {
+      setDialingBanner(true);
+    }
+  }, [active.data?.code]);
+
+  useEffect(() => {
+    if (!dialingBanner) return;
+    let attempt = 0;
+    const timer = setInterval(async () => {
+      attempt += 1;
+      await qc.invalidateQueries({ queryKey: ['active-lead'] });
+      await qc.invalidateQueries({ queryKey: ['context'] });
+      const latest = await getActiveLead();
+      if (latest?.ok || latest?.code !== 'VICIDIAL_DIALING' || attempt >= 10) {
+        setDialingBanner(false);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [dialingBanner, qc]);
 
   const phoneConnected = Boolean(status.data?.phoneConnected);
   const campaignConnected = Boolean(status.data?.campaign);
@@ -302,7 +318,6 @@ export default function AgentPage() {
                 onClick={() =>
                   connectCampaign.mutate({
                     campaignId: campaign,
-                    mode: /manual/i.test(campaign) ? 'manual' : mode,
                     rememberCredentials: remember,
                   })
                 }
@@ -395,7 +410,12 @@ export default function AgentPage() {
                     onClick={() =>
                       manualNext.mutate({
                         campaignId: status.data?.campaign || campaign || '',
-                        mode: 'manual',
+                      }, {
+                        onSuccess: (resp:any) => {
+                          if (resp?.result?.classification === 'DIALING_NO_LEAD_YET') {
+                            setDialingBanner(true);
+                          }
+                        }
                       })
                     }
                     disabled={!campaignConnected || manualNext.isPending}
@@ -439,8 +459,8 @@ export default function AgentPage() {
               </Stack>
             )}
 
-            {manualNext.isError && <Alert severity='error'>No fue posible ejecutar DIAL NEXT NUMBER en Vicidial.</Alert>}
-            {manualNext.data?.ok && <Alert severity='success'>Marcación manual solicitada correctamente.</Alert>}
+            {manualNext.data?.ok && !dialingBanner && <Alert severity='success'>Marcación manual solicitada correctamente.</Alert>}
+            {dialingBanner && <Alert severity='info'>Marcando...</Alert>}
             {manualDialMut.isError && <Alert severity='error'>No fue posible ejecutar MANUAL DIAL.</Alert>}
             {manualDialMut.data?.ok && (
               <Alert severity='success'>Llamada solicitada. Call ID: {manualDialMut.data?.callId || 'N/D'}.</Alert>

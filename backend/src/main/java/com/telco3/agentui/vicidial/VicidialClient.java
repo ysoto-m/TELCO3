@@ -294,6 +294,26 @@ public class VicidialClient {
     return executePost(s.baseUrl(), "/agc/vdc_db_query.php", params);
   }
 
+
+
+  public Optional<String> campaignDialMethod(String campaignId) {
+    if (!StringUtils.hasText(campaignId)) {
+      return Optional.empty();
+    }
+    var result = call("/vicidial/non_agent_api.php", new HashMap<>(Map.of("function", "campaign_status", "campaign_id", campaignId)));
+    String body = Objects.toString(result.body(), "");
+    Matcher matcher = Pattern.compile("(?i)dial_method\\s*[:=]\\s*([A-Z_]+)").matcher(body);
+    if (matcher.find()) {
+      return Optional.ofNullable(matcher.group(1)).map(String::trim).filter(v -> !v.isBlank());
+    }
+    Map<String, String> lines = parseKeyValueLines(body);
+    String value = lines.get("dial_method");
+    if (value == null) {
+      value = lines.get("dialmethod");
+    }
+    return Optional.ofNullable(value).map(String::trim).filter(v -> !v.isBlank());
+  }
+
   public String campaigns() {
     return call("/agc/api.php", new HashMap<>(Map.of("function", "campaign_status"))).body();
   }
