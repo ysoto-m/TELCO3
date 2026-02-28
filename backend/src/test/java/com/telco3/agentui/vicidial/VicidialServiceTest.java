@@ -53,7 +53,7 @@ class VicidialServiceTest {
   @Test
   void resolveModeForCampaignPersistsMode() {
     VicidialClient client = mock(VicidialClient.class);
-    when(client.campaignDialMethod("MAN2")).thenReturn(Optional.of("MANUAL"));
+    when(client.campaignDialConfig("MAN2")).thenReturn(new VicidialClient.CampaignDialConfig(Optional.of("MANUAL"), Optional.of(0D)));
     VicidialCredentialService credentialService = mock(VicidialCredentialService.class);
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService, new MockEnvironment());
 
@@ -61,5 +61,18 @@ class VicidialServiceTest {
 
     assertEquals("manual", mode);
     verify(credentialService).updateSessionMode("agent1", "manual");
+  }
+
+  @Test
+  void resolveModeForCampaignUsesAutoDialLevelAsPredictive() {
+    VicidialClient client = mock(VicidialClient.class);
+    when(client.campaignDialConfig("MAN2")).thenReturn(new VicidialClient.CampaignDialConfig(Optional.of("MANUAL"), Optional.of(1D)));
+    VicidialCredentialService credentialService = mock(VicidialCredentialService.class);
+    VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService, new MockEnvironment());
+
+    String mode = service.resolveModeForCampaign("agent1", "MAN2");
+
+    assertEquals("predictive", mode);
+    verify(credentialService).updateSessionMode("agent1", "predictive");
   }
 }
