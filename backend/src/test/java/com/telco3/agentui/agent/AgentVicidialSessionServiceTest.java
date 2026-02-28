@@ -3,6 +3,7 @@ package com.telco3.agentui.agent;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialCampaignParser;
 import com.telco3.agentui.vicidial.VicidialDiagnosticsService;
+import com.telco3.agentui.vicidial.VicidialService;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialSessionClient;
 import org.junit.jupiter.api.Test;
@@ -22,11 +23,12 @@ class AgentVicidialSessionServiceTest {
     VicidialCredentialService credentialService = mock(VicidialCredentialService.class);
     VicidialCampaignParser campaignParser = new VicidialCampaignParser();
     VicidialDiagnosticsService diagnosticsService = mock(VicidialDiagnosticsService.class);
+    VicidialService vicidialService = mock(VicidialService.class);
     Environment env = mock(Environment.class);
     when(env.getActiveProfiles()).thenReturn(new String[]{"prod"});
     when(env.getProperty(eq("APP_ENV"), anyString())).thenReturn("prod");
 
-    AgentVicidialSessionService service = new AgentVicidialSessionService(sessionClient, vicidialClient, credentialService, campaignParser, diagnosticsService, env);
+    AgentVicidialSessionService service = new AgentVicidialSessionService(sessionClient, vicidialClient, credentialService, campaignParser, diagnosticsService, env, vicidialService);
 
     when(sessionClient.connectPhone("48373608", "1001", "anexo_1001")).thenReturn("SUCCESS");
     service.connectPhone("48373608", "1001");

@@ -297,11 +297,19 @@ public class VicidialClient {
 
 
   public Optional<String> campaignDialMethod(String campaignId) {
+    return campaignDialConfig(campaignId).dialMethod();
+  }
+
+  public CampaignDialConfig campaignDialConfig(String campaignId) {
     if (!StringUtils.hasText(campaignId)) {
-      return Optional.empty();
+      return new CampaignDialConfig(Optional.empty(), Optional.empty());
     }
     var result = call("/vicidial/non_agent_api.php", new HashMap<>(Map.of("function", "campaign_status", "campaign_id", campaignId)));
     String body = Objects.toString(result.body(), "");
+    return new CampaignDialConfig(extractDialMethod(body), extractAutoDialLevel(body));
+  }
+
+  private Optional<String> extractDialMethod(String body) {
     Matcher matcher = Pattern.compile("(?i)dial_method\\s*[:=]\\s*([A-Z_]+)").matcher(body);
     if (matcher.find()) {
       return Optional.ofNullable(matcher.group(1)).map(String::trim).filter(v -> !v.isBlank());
@@ -312,6 +320,30 @@ public class VicidialClient {
       value = lines.get("dialmethod");
     }
     return Optional.ofNullable(value).map(String::trim).filter(v -> !v.isBlank());
+  }
+
+  private Optional<Double> extractAutoDialLevel(String body) {
+    Matcher matcher = Pattern.compile("(?i)auto_dial_level\\s*[:=]\\s*([0-9]+(?:\\.[0-9]+)?)").matcher(body);
+    if (matcher.find()) {
+      return parseDoubleSafe(matcher.group(1));
+    }
+    Map<String, String> lines = parseKeyValueLines(body);
+    String value = lines.get("auto_dial_level");
+    if (value == null) {
+      value = lines.get("autodiallevel");
+    }
+    return parseDoubleSafe(value);
+  }
+
+  private Optional<Double> parseDoubleSafe(String value) {
+    if (!StringUtils.hasText(value)) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(Double.parseDouble(value.trim()));
+    } catch (NumberFormatException ignored) {
+      return Optional.empty();
+    }
   }
 
   public String campaigns() {
@@ -751,6 +783,8 @@ public class VicidialClient {
     RELOGIN_REQUIRED,
     UNKNOWN
   }
+
+  public record CampaignDialConfig(Optional<String> dialMethod, Optional<Double> autoDialLevel) {}
 
   public record ActiveLeadResult(ActiveLeadOutcome outcome, String rawBody, int httpStatus) {}
 

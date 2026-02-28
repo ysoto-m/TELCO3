@@ -300,9 +300,6 @@ paths:
       security: [{ bearerAuth: [] }]
       parameters:
         - { name: leadId, in: query, required: false, schema: { type: integer } }
-        - { name: phone, in: query, required: false, schema: { type: string } }
-        - { name: campaign, in: query, required: false, schema: { type: string } }
-        - { name: mode, in: query, required: true, schema: { type: string, enum: [predictive, manual] } }
       responses:
         '200':
           content:

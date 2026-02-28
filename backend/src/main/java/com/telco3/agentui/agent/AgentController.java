@@ -244,7 +244,7 @@ public class AgentController {
       if (leadResult.outcome() != VicidialClient.ActiveLeadOutcome.SUCCESS) {
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("ok", true);
-        response.put("context", contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
+        response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
         response.put("lead", null);
         return response;
       }
@@ -254,7 +254,7 @@ public class AgentController {
     if (resolvedLeadId == null) {
       Map<String, Object> response = new LinkedHashMap<>();
       response.put("ok", true);
-      response.put("context", contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
+      response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
       response.put("lead", null);
       return response;
     }
@@ -264,13 +264,12 @@ public class AgentController {
     if (dni == null || dni.isBlank()) {
       Map<String, Object> response = new LinkedHashMap<>();
       response.put("ok", true);
-      response.put("context", contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
+      response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
       response.put("lead", Map.of("leadId", resolvedLeadId));
       response.put("customer", null);
       response.put("phones", List.of());
       response.put("interactions", List.of());
       response.put("dispoOptions", List.of("SALE", "NOANS", "CALLBK", "DNC"));
-      response.put("mode", Objects.toString(session.connectedMode, "predictive"));
       return response;
     }
     var c = customers.findByDni(dni).orElseGet(()->{var nc=new CustomerEntity(); nc.dni=dni; nc.firstName="TODO"; nc.lastName="TODO"; return nc;});
@@ -305,12 +304,12 @@ public class AgentController {
     customer.put("lastName", Objects.toString(c.lastName, "TODO"));
 
     Map<String, Object> response = new LinkedHashMap<>();
+    response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
     response.put("lead", lead);
     response.put("customer", customer);
     response.put("phones", ph);
     response.put("interactions", hist);
     response.put("dispoOptions", List.of("SALE", "NOANS", "CALLBK", "DNC"));
-    response.put("mode", Objects.toString(session.connectedMode, "predictive"));
     return response;
   }
 

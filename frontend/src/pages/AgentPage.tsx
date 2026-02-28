@@ -80,7 +80,7 @@ export default function AgentPage() {
     enabled: Boolean(status.data?.campaign),
   });
 
-  const mode = (context.data?.mode || status.data?.mode || 'predictive') as 'predictive' | 'manual';
+  const mode = (context.data?.mode || 'predictive') as 'predictive' | 'manual';
   const isManualFlow = mode === 'manual';
 
   const connectPhone = useMutation({
@@ -330,7 +330,7 @@ export default function AgentPage() {
           </Stack>
         </ViciCard>
 
-        <ViciCard title='Paso 3 · Tipificación' subtitle='Guarda la gestión del lead activo sin cambiar el flujo actual.'>
+        <ViciCard title='Paso 3 · Tipificación' subtitle='Guarda la gestión del lead activo.'>
           <Stack gap={1.5}>
             {!canType && (
               <Alert severity='info'>Debes conectar anexo y campaña para habilitar disposición, notas y guardado.</Alert>
@@ -420,7 +420,7 @@ export default function AgentPage() {
                     }
                     disabled={!campaignConnected || manualNext.isPending}
                   >
-                    Siguiente
+                    SIGUIENTE
                   </Button>
 
                   <TextField
@@ -453,7 +453,7 @@ export default function AgentPage() {
                       })
                     }
                   >
-                    Marcar
+                    MARCAR
                   </Button>
                 </Stack>
               </Stack>

@@ -29,13 +29,20 @@ public class VicidialService {
   }
 
   public String resolveModeForCampaign(String appUsername, String campaignId) {
-    Optional<String> dialMethod = client.campaignDialMethod(campaignId);
-    String mode = dialMethod.map(this::mapDialMethodToMode).orElse("predictive");
+    VicidialClient.CampaignDialConfig config = client.campaignDialConfig(campaignId);
+    String mode = inferMode(config.dialMethod(), config.autoDialLevel());
     credentialService.updateSessionMode(appUsername, mode);
     if (isDevEnvironment()) {
-      log.info("Vicidial campaign mode resolved agent={} campaign={} dialMethod={} mode={}", appUsername, campaignId, dialMethod.orElse("N/A"), mode);
+      log.info("Vicidial campaign mode resolved agent={} campaign={} dialMethod={} autoDialLevel={} mode={}", appUsername, campaignId, config.dialMethod().orElse("N/A"), config.autoDialLevel().map(String::valueOf).orElse("N/A"), mode);
     }
     return mode;
+  }
+
+  private String inferMode(Optional<String> dialMethod, Optional<Double> autoDialLevel) {
+    if (autoDialLevel.isPresent() && autoDialLevel.get() > 0D) {
+      return "predictive";
+    }
+    return dialMethod.map(this::mapDialMethodToMode).orElse("predictive");
   }
 
   public String mapDialMethodToMode(String dialMethod) {
