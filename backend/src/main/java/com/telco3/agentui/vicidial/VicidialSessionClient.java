@@ -27,6 +27,7 @@ public class VicidialSessionClient {
   }
 
   public String connectPhone(String agentUser, String phoneLogin, String phonePass) {
+    configService.assertVicidialApiConfigured();
     var settings = configService.resolve();
     String baseUrl = normalizeBaseUrl(settings.baseUrl());
 

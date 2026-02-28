@@ -34,6 +34,11 @@ public class AdminVicidialConfigController {
     response.put("apiUser", config.apiUser());
     response.put("apiPass", config.apiPassMasked());
     response.put("source", config.source());
+    response.put("dbHost", config.dbHost());
+    response.put("dbPort", config.dbPort());
+    response.put("dbName", config.dbName());
+    response.put("dbUser", config.dbUser());
+    response.put("dbPass", config.dbPassMasked());
     response.put("updatedAt", config.updatedAt());
     return response;
   }
@@ -46,7 +51,12 @@ public class AdminVicidialConfigController {
         req.baseUrl(),
         req.apiUser(),
         req.apiPass(),
-        req.source()
+        req.source(),
+        req.dbHost(),
+        req.dbPort(),
+        req.dbName(),
+        req.dbUser(),
+        req.dbPass()
     ));
     return Map.of("ok", true);
   }
@@ -73,6 +83,6 @@ public class AdminVicidialConfigController {
   }
 
   public record VicidialConfigRequest(@NotBlank String baseUrl, @NotBlank String apiUser, @NotBlank String apiPass,
-                                      String source) {
+                                      String source, String dbHost, String dbPort, String dbName, String dbUser, String dbPass) {
   }
 }

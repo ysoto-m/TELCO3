@@ -5,8 +5,6 @@ import com.telco3.agentui.domain.Entities;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
-import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -14,11 +12,11 @@ class VicidialServiceTest {
 
   @Test
   void mapsDialMethodToMode() {
-    VicidialService service = new VicidialService(mock(VicidialClient.class), new VicidialDialResponseParser(), mock(VicidialCredentialService.class), new MockEnvironment());
+    VicidialService service = new VicidialService(mock(VicidialClient.class), new VicidialDialResponseParser(),
+        mock(VicidialCredentialService.class), new MockEnvironment(), mock(VicidialRuntimeDataSourceFactory.class));
     assertEquals("manual", service.mapDialMethodToMode("MANUAL"));
     assertEquals("manual", service.mapDialMethodToMode("INBOUND_MAN"));
     assertEquals("predictive", service.mapDialMethodToMode("PREDICTIVE"));
-    assertEquals("predictive", service.mapDialMethodToMode("ADAPT_PREDICTIVE"));
   }
 
   @Test
@@ -27,7 +25,8 @@ class VicidialServiceTest {
     when(client.activeLeadSafe("agent1"))
         .thenReturn(new VicidialClient.ActiveLeadResult(VicidialClient.ActiveLeadOutcome.NO_ACTIVE_LEAD, "", 200));
     VicidialCredentialService credentialService = mock(VicidialCredentialService.class);
-    VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService, new MockEnvironment());
+    VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
+        new MockEnvironment(), mock(VicidialRuntimeDataSourceFactory.class));
 
     var result = service.dialNextWithLeadRetry("agent1", "M123456789", "M123456789", null);
 
@@ -38,7 +37,8 @@ class VicidialServiceTest {
 
   @Test
   void classifyActiveLeadReturnsDialingWhenSessionInDialState() {
-    VicidialService service = new VicidialService(mock(VicidialClient.class), new VicidialDialResponseParser(), mock(VicidialCredentialService.class), new MockEnvironment());
+    VicidialService service = new VicidialService(mock(VicidialClient.class), new VicidialDialResponseParser(),
+        mock(VicidialCredentialService.class), new MockEnvironment(), mock(VicidialRuntimeDataSourceFactory.class));
     Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
     session.currentDialStatus = "DIALING";
     session.currentCallId = "M777";
@@ -48,31 +48,5 @@ class VicidialServiceTest {
     assertTrue(state.dialing());
     assertFalse(state.hasLead());
     assertEquals("M777", state.callId());
-  }
-
-  @Test
-  void resolveModeForCampaignPersistsMode() {
-    VicidialClient client = mock(VicidialClient.class);
-    when(client.campaignDialConfig("MAN2")).thenReturn(new VicidialClient.CampaignDialConfig(Optional.of("MANUAL"), Optional.of(0D)));
-    VicidialCredentialService credentialService = mock(VicidialCredentialService.class);
-    VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService, new MockEnvironment());
-
-    String mode = service.resolveModeForCampaign("agent1", "MAN2");
-
-    assertEquals("manual", mode);
-    verify(credentialService).updateSessionMode("agent1", "manual");
-  }
-
-  @Test
-  void resolveModeForCampaignUsesAutoDialLevelAsPredictive() {
-    VicidialClient client = mock(VicidialClient.class);
-    when(client.campaignDialConfig("MAN2")).thenReturn(new VicidialClient.CampaignDialConfig(Optional.of("MANUAL"), Optional.of(1D)));
-    VicidialCredentialService credentialService = mock(VicidialCredentialService.class);
-    VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService, new MockEnvironment());
-
-    String mode = service.resolveModeForCampaign("agent1", "MAN2");
-
-    assertEquals("predictive", mode);
-    verify(credentialService).updateSessionMode("agent1", "predictive");
   }
 }

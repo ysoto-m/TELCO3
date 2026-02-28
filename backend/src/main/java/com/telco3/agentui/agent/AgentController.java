@@ -122,8 +122,20 @@ public class AgentController {
     var session = requireConnectedSession(agentUser);
     requireSessionField(session.connectedPhoneLogin, "phone_login");
     requireSessionField(session.connectedCampaign, "campaign");
+    requireSessionField(session.serverIp, "server_ip");
+    requireSessionField(session.sessionName, "session_name");
+    if (session.agentLogId == null) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesión Vicidial está incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
+    }
 
     var state = vicidialService.classifyActiveLead(agentUser, session);
+    if (state.reloginRequired()) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_RELOGIN_REQUIRED",
+          "La sesión de Vicidial requiere re-login.",
+          "Conecte anexo/campaña nuevamente para continuar.",
+          null);
+    }
     if (state.dialing()) {
       Map<String, Object> response = new LinkedHashMap<>();
       response.put("ok", false);
@@ -134,7 +146,9 @@ public class AgentController {
     }
 
     if (!state.hasLead()) {
-      return businessNoLeadResponse(buildActiveLeadDetails("NO_ACTIVE_LEAD", 200, "", agentUser));
+      String raw = Objects.toString(state.rawBody(), "");
+      String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
+      return businessNoLeadResponse(buildActiveLeadDetails(state.classification(), state.httpStatus(), rawSnippet, agentUser));
     }
 
     Map<String, Object> lead = new LinkedHashMap<>();
@@ -159,7 +173,7 @@ public class AgentController {
             "Actualice users.agent_pass_encrypted antes de usar marcación manual.",
             null));
 
-    String resolvedMode = Objects.toString(session.connectedMode, "predictive");
+    String resolvedMode = vicidialService.resolveModeForCampaign(agentUser, req.campaignId());
     Map<String, String> payload = dialRequestBuilder.buildDialNextPayload(agentUser, agentPass, session, req.campaignId());
     var result = vicidial.manualDialNextCall(payload);
     String raw = Objects.toString(result.body(), "");
@@ -199,6 +213,11 @@ public class AgentController {
             "Actualice users.agent_pass_encrypted antes de usar marcación manual.",
             null));
 
+    String mode = vicidialService.resolveModeForCampaign(agentUser, req.campaignId());
+    if (!"manual".equalsIgnoreCase(mode)) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_MODE_NOT_MANUAL", "La campaña no está en modo manual.", "Use una campaña con dial_method MANUAL para marcación manual.", Map.of("mode", mode));
+    }
+
     var overrides = new VicidialDialRequestBuilder.ManualDialOverrides(req.phoneNumber(), req.phoneCode(), req.dialTimeout(), req.dialPrefix());
     LinkedHashMap<String, String> payload = new LinkedHashMap<>(dialRequestBuilder.buildManualDialPayload(agentUser, agentPass, session, req.campaignId(), overrides));
     payload.put("preview", "YES".equalsIgnoreCase(req.preview()) ? "YES" : "NO");
@@ -230,6 +249,11 @@ public class AgentController {
     var session = requireConnectedSession(agentUser);
     requireSessionField(session.connectedPhoneLogin, "phone_login");
     requireSessionField(session.connectedCampaign, "campaign");
+    requireSessionField(session.serverIp, "server_ip");
+    requireSessionField(session.sessionName, "session_name");
+    if (session.agentLogId == null) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesión Vicidial está incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
+    }
 
     Long resolvedLeadId = leadId;
     if (resolvedLeadId == null) {
@@ -439,7 +463,7 @@ public class AgentController {
 
   private VicidialServiceException dialBusinessException(String code, int httpStatus, VicidialDialResponseParser.DialClassification classification, String rawSnippet, Map<String, String> payload, String defaultMessage) {
     HttpStatus status = switch (classification) {
-      case RELOGIN_REQUIRED, INVALID_SESSION -> HttpStatus.UNAUTHORIZED;
+      case RELOGIN_REQUIRED, INVALID_SESSION -> HttpStatus.CONFLICT;
       case NO_LEADS -> HttpStatus.CONFLICT;
       case INVALID_PARAMS -> HttpStatus.UNPROCESSABLE_ENTITY;
       case UNKNOWN -> HttpStatus.CONFLICT;

@@ -12,6 +12,7 @@ export const disconnectVicidialPhone = ()=>api.post('/api/agent/vicidial/phone/d
 export const getVicidialCampaigns = ()=>api.get('/api/agent/vicidial/campaigns').then(r=>r.data);
 export const connectVicidialCampaign = (payload:{campaignId:string;rememberCredentials?:boolean})=>api.post('/api/agent/vicidial/campaign/connect',payload).then(r=>r.data);
 export const getVicidialStatus = ()=>api.get('/api/agent/vicidial/status').then(r=>r.data);
+export const getCampaignDetails = (campaignId:string)=>api.get(`/api/campaigns/${campaignId}`).then(r=>r.data);
 
 export const getActiveLead = ()=>api.get('/api/agent/active-lead').then(r=>r.data);
 export const getContext = (p:{leadId?:number})=>api.get('/api/agent/context',{params:p}).then(r=>r.data);

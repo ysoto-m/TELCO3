@@ -43,4 +43,12 @@ class VicidialDialResponseParserTest {
     assertFalse(result.success());
     assertEquals(VicidialDialResponseParser.DialClassification.NO_LEADS, result.classification());
   }
+  @Test
+  void parseNoLeadsTakesPriorityOverLoginMarkers() {
+    String raw = "<html><body>Please login - there are no leads in the hopper for this campaign</body></html>";
+    var result = parser.parse(raw);
+    assertFalse(result.success());
+    assertEquals(VicidialDialResponseParser.DialClassification.NO_LEADS, result.classification());
+  }
+
 }
