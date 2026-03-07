@@ -146,7 +146,7 @@ class AgentVicidialStatusControllerTest {
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
     when(vicidialService.classifyActiveLead(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(VicidialService.ActiveLeadState.none());
+        .thenReturn(VicidialService.ActiveLeadState.none(200, "NO_ACTIVE_LEAD", "no active lead"));
 
     mockMvc.perform(get("/api/agent/active-lead"))
         .andExpect(status().isOk())
