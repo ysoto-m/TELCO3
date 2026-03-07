@@ -97,11 +97,11 @@ public class VicidialService {
 
     var leadResult = client.activeLeadSafe(agentUser);
     if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED) {
-      return ActiveLeadState.relogin(leadResult.statusCode(), leadResult.rawBody());
+      return ActiveLeadState.relogin(leadResult.httpStatus(), leadResult.rawBody());
     }
-    if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.NO_LEAD) {
+    if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.NO_ACTIVE_LEAD) {
       credentialService.updateDialRuntime(agentUser, null, null, null);
-      return ActiveLeadState.none(leadResult.statusCode(), "NO_ACTIVE_LEAD", leadResult.rawBody());
+      return ActiveLeadState.none(leadResult.httpStatus(), "NO_ACTIVE_LEAD", leadResult.rawBody());
     }
     if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.SUCCESS) {
       Long leadId = extractLong(leadResult.rawBody(), "lead_id");
@@ -111,7 +111,7 @@ public class VicidialService {
       }
     }
     credentialService.updateDialRuntime(agentUser, null, null, null);
-    return ActiveLeadState.none(leadResult.statusCode(), "UNKNOWN", leadResult.rawBody());
+    return ActiveLeadState.none(leadResult.httpStatus(), "UNKNOWN", leadResult.rawBody());
   }
 
   private String extract(String raw, String key) {
