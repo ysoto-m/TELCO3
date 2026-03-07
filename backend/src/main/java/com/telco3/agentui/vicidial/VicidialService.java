@@ -5,10 +5,12 @@ import com.telco3.agentui.domain.Entities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -65,7 +67,7 @@ public class VicidialService {
     return "predictive";
   }
 
-  public DialNextResult dialNextWithLeadRetry(String agentUser, String rawBody, String callId, Long leadId) {
+  public DialNextResult dialNextWithLeadRetry(String agentUser, Entities.AgentVicidialCredentialEntity session, String rawBody, String callId, Long leadId) {
     Long resolvedLeadId = leadId;
     if (resolvedLeadId == null) {
       for (int i = 0; i < 5; i++) {
@@ -82,12 +84,36 @@ public class VicidialService {
     }
 
     if (resolvedLeadId == null) {
+      resolvedLeadId = resolveLeadFromRuntimeTables(session, callId, null).leadId();
+    }
+
+    if (resolvedLeadId == null) {
       credentialService.updateDialRuntime(agentUser, "DIALING", callId, null);
       return new DialNextResult(callId, null, "DIALING_NO_LEAD_YET");
     }
 
     credentialService.updateDialRuntime(agentUser, "ACTIVE", callId, resolvedLeadId);
     return new DialNextResult(callId, resolvedLeadId, "READY");
+  }
+
+  public DialNextResult resolveManualDialLead(String agentUser, Entities.AgentVicidialCredentialEntity session, String callId, Long leadId, String phoneNumber) {
+    Long resolvedLeadId = leadId;
+    String classification = "READY";
+    if (resolvedLeadId == null) {
+      RuntimeLeadResolution runtimeLead = resolveLeadFromRuntimeTables(session, callId, phoneNumber);
+      resolvedLeadId = runtimeLead.leadId();
+      if (resolvedLeadId == null) {
+        classification = runtimeLead.agentStatus() != null && runtimeLead.agentStatus().equalsIgnoreCase("PAUSED")
+            ? "DIALING_AGENT_PAUSED"
+            : "DIALING_NO_LEAD_YET";
+      }
+    }
+
+    credentialService.updateDialRuntime(agentUser,
+        resolvedLeadId == null ? "DIALING" : "ACTIVE",
+        callId,
+        resolvedLeadId);
+    return new DialNextResult(callId, resolvedLeadId, classification);
   }
 
   public ActiveLeadState classifyActiveLead(String agentUser, Entities.AgentVicidialCredentialEntity session) {
@@ -99,10 +125,9 @@ public class VicidialService {
     if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED) {
       return ActiveLeadState.relogin(leadResult.httpStatus(), leadResult.rawBody());
     }
-    if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.NO_ACTIVE_LEAD) {
-      credentialService.updateDialRuntime(agentUser, null, null, null);
-      return ActiveLeadState.none(leadResult.httpStatus(), "NO_ACTIVE_LEAD", leadResult.rawBody());
-    }
+    String apiClassification = leadResult.outcome() == VicidialClient.ActiveLeadOutcome.NO_ACTIVE_LEAD
+        ? "NO_ACTIVE_LEAD"
+        : "UNKNOWN";
     if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.SUCCESS) {
       Long leadId = extractLong(leadResult.rawBody(), "lead_id");
       if (leadId != null) {
@@ -110,8 +135,111 @@ public class VicidialService {
         return ActiveLeadState.ready(leadId, extract(leadResult.rawBody(), "phone_number"), extract(leadResult.rawBody(), "campaign"));
       }
     }
+
+    RuntimeLeadResolution runtimeLead = resolveLeadFromRuntimeTables(session, session.currentCallId, null);
+    if (runtimeLead.leadId() != null) {
+      credentialService.updateDialRuntime(agentUser, "ACTIVE", session.currentCallId, runtimeLead.leadId());
+      return ActiveLeadState.ready(runtimeLead.leadId(), runtimeLead.phoneNumber(), runtimeLead.campaign());
+    }
+
+    if (runtimeLead.agentStatus() != null && runtimeLead.agentStatus().equalsIgnoreCase("PAUSED")) {
+      credentialService.updateDialRuntime(agentUser, null, session.currentCallId, null);
+      return ActiveLeadState.none(200, "AGENT_PAUSED", leadResult.rawBody(), runtimeLead.details());
+    }
+
     credentialService.updateDialRuntime(agentUser, null, null, null);
-    return ActiveLeadState.none(leadResult.httpStatus(), "UNKNOWN", leadResult.rawBody());
+    String classification = "NO_ACTIVE_LEAD".equals(apiClassification) ? "NO_ACTIVE_LEAD" : "NO_MATCH_RUNTIME";
+    return ActiveLeadState.none(leadResult.httpStatus(), classification, leadResult.rawBody(), runtimeLead.details());
+  }
+
+  public RuntimeLeadResolution resolveLeadFromRuntimeTables(Entities.AgentVicidialCredentialEntity session, String callId, String phoneNumber) {
+    JdbcTemplate jdbc = new JdbcTemplate(dataSourceFactory.getOrCreate());
+    RuntimeLeadResolution fromLiveAgents = queryFromLiveAgents(jdbc, session);
+    if (fromLiveAgents.leadId() != null) {
+      return fromLiveAgents;
+    }
+
+    RuntimeLeadResolution fromAutoCalls = queryFromAutoCalls(jdbc, session, callId, phoneNumber, fromLiveAgents.agentStatus());
+    if (fromAutoCalls.leadId() != null || fromAutoCalls.agentStatus() != null) {
+      return fromAutoCalls;
+    }
+    return fromLiveAgents;
+  }
+
+  private RuntimeLeadResolution queryFromLiveAgents(JdbcTemplate jdbc, Entities.AgentVicidialCredentialEntity session) {
+    String sql = """
+        SELECT user, status, campaign_id, lead_id, callerid, uniqueid
+          FROM vicidial_live_agents
+         WHERE user = ?
+         ORDER BY last_update_time DESC
+         LIMIT 1
+        """;
+    try {
+      return jdbc.query(sql, rs -> {
+        if (!rs.next()) {
+          return RuntimeLeadResolution.empty();
+        }
+        Long leadId = rs.getLong("lead_id");
+        if (rs.wasNull() || leadId != null && leadId <= 0) {
+          leadId = null;
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("source", "vicidial_live_agents");
+        details.put("agentStatus", rs.getString("status"));
+        details.put("campaign", rs.getString("campaign_id"));
+        details.put("callerId", rs.getString("callerid"));
+        details.put("uniqueId", rs.getString("uniqueid"));
+        return new RuntimeLeadResolution(leadId, null, rs.getString("campaign_id"), rs.getString("status"), details);
+      }, session.agentUser);
+    } catch (DataAccessException ex) {
+      log.warn("Vicidial runtime query failed table=vicidial_live_agents cause={}", ex.getClass().getSimpleName());
+      return RuntimeLeadResolution.empty();
+    }
+  }
+
+  private RuntimeLeadResolution queryFromAutoCalls(JdbcTemplate jdbc, Entities.AgentVicidialCredentialEntity session,
+                                                   String callId, String phoneNumber, String agentStatus) {
+    String sql = """
+        SELECT lead_id, callerid, uniqueid, phone_number, campaign_id, status
+          FROM vicidial_auto_calls
+         WHERE user = ?
+           AND (? IS NULL OR campaign_id = ?)
+           AND (
+             (? IS NOT NULL AND callerid = ?)
+             OR (? IS NOT NULL AND uniqueid = ?)
+             OR (? IS NOT NULL AND phone_number = ?)
+             OR (? IS NULL AND ? IS NULL)
+           )
+         ORDER BY call_time DESC
+         LIMIT 1
+        """;
+    try {
+      return jdbc.query(sql, rs -> {
+        if (!rs.next()) {
+          return RuntimeLeadResolution.empty();
+        }
+        Long leadId = rs.getLong("lead_id");
+        if (rs.wasNull() || leadId != null && leadId <= 0) {
+          leadId = null;
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("source", "vicidial_auto_calls");
+        details.put("status", rs.getString("status"));
+        details.put("callerId", rs.getString("callerid"));
+        details.put("uniqueId", rs.getString("uniqueid"));
+        details.put("campaign", rs.getString("campaign_id"));
+        return new RuntimeLeadResolution(leadId, rs.getString("phone_number"), rs.getString("campaign_id"), agentStatus, details);
+      },
+          session.agentUser,
+          session.connectedCampaign, session.connectedCampaign,
+          callId, callId,
+          callId, callId,
+          phoneNumber, phoneNumber,
+          callId, phoneNumber);
+    } catch (DataAccessException ex) {
+      log.warn("Vicidial runtime query failed table=vicidial_auto_calls cause={}", ex.getClass().getSimpleName());
+      return RuntimeLeadResolution.empty();
+    }
   }
 
   private String extract(String raw, String key) {
@@ -146,21 +274,29 @@ public class VicidialService {
   public record DialNextResult(String callId, Long leadId, String classification) {}
 
   public record ActiveLeadState(boolean hasLead, boolean dialing, boolean reloginRequired, String callId, Long leadId,
-                                String phoneNumber, String campaign, int httpStatus, String classification, String rawBody) {
+                                String phoneNumber, String campaign, int httpStatus, String classification, String rawBody,
+                                Map<String, Object> details) {
     public static ActiveLeadState dialing(String callId) {
-      return new ActiveLeadState(false, true, false, callId, null, null, null, 200, "DIALING", "");
+      return new ActiveLeadState(false, true, false, callId, null, null, null, 200, "DIALING", "", Map.of());
     }
 
     public static ActiveLeadState ready(Long leadId, String phoneNumber, String campaign) {
-      return new ActiveLeadState(true, false, false, null, leadId, phoneNumber, campaign, 200, "SUCCESS", "");
+      return new ActiveLeadState(true, false, false, null, leadId, phoneNumber, campaign, 200, "SUCCESS", "", Map.of("source", "active_lead_api"));
     }
 
-    public static ActiveLeadState none(int httpStatus, String classification, String rawBody) {
-      return new ActiveLeadState(false, false, false, null, null, null, null, httpStatus, classification, rawBody);
+    public static ActiveLeadState none(int httpStatus, String classification, String rawBody, Map<String, Object> details) {
+      return new ActiveLeadState(false, false, false, null, null, null, null, httpStatus, classification, rawBody,
+          details == null ? Map.of() : details);
     }
 
     public static ActiveLeadState relogin(int httpStatus, String rawBody) {
-      return new ActiveLeadState(false, false, true, null, null, null, null, httpStatus, "RELOGIN_REQUIRED", rawBody);
+      return new ActiveLeadState(false, false, true, null, null, null, null, httpStatus, "RELOGIN_REQUIRED", rawBody, Map.of());
+    }
+  }
+
+  public record RuntimeLeadResolution(Long leadId, String phoneNumber, String campaign, String agentStatus, Map<String, Object> details) {
+    static RuntimeLeadResolution empty() {
+      return new RuntimeLeadResolution(null, null, null, null, Map.of());
     }
   }
 }

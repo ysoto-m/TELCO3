@@ -34,7 +34,7 @@ class AgentControllerVicidialFlowTest {
   void activeLeadNoLeadClassificationReturnsBusinessCode() {
     Fixture f = fixtureConnected();
     when(f.vicidialService.classifyActiveLead(eq("48373608"), any()))
-        .thenReturn(VicidialService.ActiveLeadState.none(200, "NO_ACTIVE_LEAD", "no active lead"));
+        .thenReturn(VicidialService.ActiveLeadState.none(200, "NO_ACTIVE_LEAD", "no active lead", Map.of()));
 
     Map<String, Object> response = f.controller.active(new UsernamePasswordAuthenticationToken("48373608", "n/a"));
 

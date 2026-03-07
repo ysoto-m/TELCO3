@@ -148,7 +148,17 @@ public class AgentController {
     if (!state.hasLead()) {
       String raw = Objects.toString(state.rawBody(), "");
       String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
-      return businessNoLeadResponse(buildActiveLeadDetails(state.classification(), state.httpStatus(), rawSnippet, agentUser));
+      Map<String, Object> details = buildActiveLeadDetails(state.classification(), state.httpStatus(), rawSnippet, agentUser, state.details());
+      if ("AGENT_PAUSED".equalsIgnoreCase(state.classification())) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ok", false);
+        body.put("code", "VICIDIAL_AGENT_PAUSED");
+        body.put("message", "El agente está en pausa");
+        body.put("hint", "Quite la pausa en Vicidial para recibir/continuar el lead activo.");
+        body.put("details", details);
+        return body;
+      }
+      return businessNoLeadResponse(details);
     }
 
     Map<String, Object> lead = new LinkedHashMap<>();
@@ -185,7 +195,7 @@ public class AgentController {
           "Vicidial no confirmó la marcación manual siguiente.");
     }
 
-    var dialState = vicidialService.dialNextWithLeadRetry(agentUser, raw, parsed.callId(), parsed.leadId());
+    var dialState = vicidialService.dialNextWithLeadRetry(agentUser, session, raw, parsed.callId(), parsed.leadId());
 
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", true);
@@ -233,11 +243,16 @@ public class AgentController {
     }
 
     Map<String, String> parsed = vicidial.parseKeyValueLines(raw);
+    String resolvedCallId = parsedResponse.callId() == null ? firstPresent(parsed, "call_id", "callid", "callerid") : parsedResponse.callId();
+    Long parsedLeadId = parsedResponse.leadId() == null ? toLong(firstPresent(parsed, "lead_id", "leadid")) : parsedResponse.leadId();
+    var runtimeDialState = vicidialService.resolveManualDialLead(agentUser, session, resolvedCallId, parsedLeadId, req.phoneNumber());
+
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", true);
-    response.put("callId", parsedResponse.callId() == null ? firstPresent(parsed, "call_id", "callid", "callerid") : parsedResponse.callId());
-    response.put("leadId", parsedResponse.leadId() == null ? toLong(firstPresent(parsed, "lead_id", "leadid")) : parsedResponse.leadId());
+    response.put("callId", runtimeDialState.callId());
+    response.put("leadId", runtimeDialState.leadId());
     response.put("status", firstPresent(parsed, "status", "result"));
+    response.put("classification", runtimeDialState.classification());
     maybeAttachDebug(response, payload, rawSnippet);
     return response;
   }
@@ -266,13 +281,11 @@ public class AgentController {
             null);
       }
       if (leadResult.outcome() != VicidialClient.ActiveLeadOutcome.SUCCESS) {
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("ok", true);
-        response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
-        response.put("lead", null);
-        return response;
+        var runtimeLead = vicidialService.resolveLeadFromRuntimeTables(session, session.currentCallId, null);
+        resolvedLeadId = runtimeLead.leadId();
+      } else {
+        resolvedLeadId = extractLong(leadResult.rawBody(), "lead_id");
       }
-      resolvedLeadId = extractLong(leadResult.rawBody(), "lead_id");
     }
 
     if (resolvedLeadId == null) {
@@ -446,10 +459,13 @@ public class AgentController {
     return body;
   }
 
-  private Map<String, Object> buildActiveLeadDetails(String classification, int httpStatus, String rawSnippet, String agentUser) {
+  private Map<String, Object> buildActiveLeadDetails(String classification, int httpStatus, String rawSnippet, String agentUser, Map<String, Object> extraDetails) {
     Map<String, Object> details = new LinkedHashMap<>();
     details.put("classification", classification);
     details.put("httpStatus", httpStatus);
+    if (extraDetails != null && !extraDetails.isEmpty()) {
+      details.putAll(extraDetails);
+    }
     if (debugAllowed()) {
       details.put("rawSnippet", rawSnippet);
       details.put("debugRequest", Map.of(
