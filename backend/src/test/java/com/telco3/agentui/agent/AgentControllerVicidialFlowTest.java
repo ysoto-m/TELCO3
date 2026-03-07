@@ -2,7 +2,7 @@ package com.telco3.agentui.agent;
 
 import com.telco3.agentui.domain.*;
 import com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity;
-import com.telco3.agentui.domain.Entities.Role;
+import com.telco3.agentui.domain.Role;
 import com.telco3.agentui.domain.Entities.UserEntity;
 import com.telco3.agentui.vicidial.*;
 import org.junit.jupiter.api.Test;
