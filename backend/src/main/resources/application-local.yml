@@ -1,8 +1,8 @@
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/agentui
-    username: postgres
-    password: postgres
+    username: agentui
+    password: agentui
 app:
   vicidial:
     debug: true
