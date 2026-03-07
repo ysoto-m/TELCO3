@@ -262,6 +262,7 @@ class AgentVicidialStatusControllerTest {
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
     when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
+    when(vicidialService.resolveModeForCampaign("agent1", "Manual2")).thenReturn("manual");
     when(vicidialDialRequestBuilder.buildManualDialPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(new VicidialServiceException(HttpStatus.CONFLICT,
             "VICIDIAL_SESSION_INCOMPLETE",
@@ -287,23 +288,87 @@ class AgentVicidialStatusControllerTest {
     session.connectedCampaign = "Manual";
     session.sessionName = "sess";
     session.serverIp = "10.10.10.10";
+    session.confExten = "8600051";
     session.agentLogId = 99L;
 
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
     when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
+    when(vicidialService.resolveModeForCampaign("agent1", "Manual2")).thenReturn("manual");
+    when(vicidialService.resolveLeadFromRuntimeTables(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(new VicidialService.RuntimeLeadResolution(null, null, null, null, Map.of()));
     when(vicidialDialRequestBuilder.buildManualDialPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
-        .thenThrow(new VicidialServiceException(HttpStatus.CONFLICT,
-            "VICIDIAL_SESSION_INCOMPLETE",
-            "La sesión Vicidial está incompleta para marcación manual.",
-            "Vuelva a conectar campaña para refrescar session_name/server_ip/agent_log_id.",
-            null));
+        .thenReturn(new LinkedHashMap<>(Map.of("ACTION", "manDiaLnextCaLL")));
+    when(vicidialClient.updateSettings(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "OK"));
+    when(vicidialClient.callbacksCount(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "CB=0"));
+    when(vicidialDialResponseParser.parse(org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(new VicidialDialResponseParser.ParsedDialResponse(VicidialDialResponseParser.DialClassification.RELOGIN_REQUIRED, false, null, null));
+    when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: agent_user is not logged in"));
+
+    mockMvc.perform(post("/api/agent/vicidial/dial/manual")
+            .contentType("application/json")
+            .content("{\"campaignId\":\"Manual2\",\"phoneNumber\":\"970222277\"}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_RELOGIN_REQUIRED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void manualDialWhenAgentPausedReturnsConflict() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "Manual";
+    session.sessionName = "sess";
+    session.serverIp = "10.10.10.10";
+    session.agentLogId = 99L;
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
+    when(vicidialService.resolveModeForCampaign("agent1", "Manual2")).thenReturn("manual");
+    when(vicidialService.resolveLeadFromRuntimeTables(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
+        .thenReturn(new VicidialService.RuntimeLeadResolution(null, null, "Manual", "PAUSED", Map.of("source", "vicidial_live_agents")));
 
     mockMvc.perform(post("/api/agent/vicidial/dial/manual")
             .contentType("application/json")
             .content("{\"campaignId\":\"Manual2\",\"phoneNumber\":\"970222277\"}"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("VICIDIAL_SESSION_INCOMPLETE"));
+        .andExpect(jsonPath("$.code").value("VICIDIAL_AGENT_PAUSED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void pollVicidialSessionExecutesUpdateSettingsAndCallbackCount() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "Manual";
+    session.sessionName = "sess";
+    session.serverIp = "10.10.10.10";
+    session.confExten = "8600051";
+    session.agentLogId = 99L;
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
+    when(vicidialClient.updateSettings(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "SETTINGS_OK"));
+    when(vicidialClient.callbacksCount(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "CALLBACKS=0"));
+
+    mockMvc.perform(post("/api/agent/vicidial/poll"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.ok").value(true))
+        .andExpect(jsonPath("$.updateSettingsHttpStatus").value(200))
+        .andExpect(jsonPath("$.callbacksCountHttpStatus").value(200));
   }
 
   @Test

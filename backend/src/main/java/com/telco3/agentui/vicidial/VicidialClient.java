@@ -201,6 +201,24 @@ public class VicidialClient {
     return executePost(s.baseUrl(), "/agc/vdc_db_query.php", payload);
   }
 
+  public VicidialHttpResult manualDialNextCall(String agentUser, Map<String, String> params) {
+    return executeVdcQueryWithCookies(agentUser, params);
+  }
+
+  public VicidialHttpResult updateSettings(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "update_settings");
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
+  public VicidialHttpResult callbacksCount(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "CalLBacKCounT");
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
   public ManualDialOutcome evaluateManualDialBody(String body) {
     String normalized = normalize(body);
     if (containsLoginForm(body)
@@ -658,6 +676,17 @@ public class VicidialClient {
     } catch (IOException ex) {
       throw new RuntimeException(ex.getMessage(), ex);
     }
+  }
+
+  private VicidialHttpResult executeVdcQueryWithCookies(String agentUser, Map<String, String> params) {
+    configService.assertVicidialApiConfigured();
+    var settings = configService.resolve();
+    var payload = new LinkedHashMap<String, String>();
+    payload.putAll(params);
+    if (StringUtils.hasText(settings.source()) && !payload.containsKey("source")) {
+      payload.put("source", settings.source());
+    }
+    return executePostWithCookies(settings.baseUrl(), "/agc/vdc_db_query.php", payload, agentUser);
   }
 
   private List<NameValuePair> toNameValuePairs(Map<String, String> params) {
