@@ -2,6 +2,7 @@ package com.telco3.agentui.admin;
 
 import com.telco3.agentui.agent.VicidialCredentialService;
 import com.telco3.agentui.domain.Entities;
+import com.telco3.agentui.domain.Role;
 import com.telco3.agentui.domain.InteractionRepository;
 import com.telco3.agentui.domain.UserRepository;
 import com.telco3.agentui.domain.Entities.UserEntity;
@@ -163,7 +164,7 @@ public class AdminController {
     UserEntity u = new UserEntity();
     u.username = req.username();
     u.passwordHash = req.password() == null || req.password().isBlank() ? "{plain}changeme" : encoder.encode(req.password());
-    u.role = Entities.Role.valueOf(req.role());
+    u.role = Role.valueOf(req.role());
     u.active = req.active() == null || req.active();
     users.save(u);
     return Map.of("ok", true, "id", u.id);
@@ -174,7 +175,7 @@ public class AdminController {
     UserEntity u = users.findById(id).orElseThrow();
     u.username = req.username();
     if (req.password() != null && !req.password().isBlank()) u.passwordHash = encoder.encode(req.password());
-    u.role = Entities.Role.valueOf(req.role());
+    u.role = Role.valueOf(req.role());
     u.active = req.active() == null || req.active();
     users.save(u);
     return Map.of("ok", true);

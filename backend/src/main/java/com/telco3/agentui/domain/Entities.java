@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import java.time.OffsetDateTime;
 
 public class Entities {
-  public enum Role { AGENT, REPORT_ADMIN }
   public enum SyncStatus { PENDING, SYNCED, FAILED }
 
   @Entity @Table(name="users")
