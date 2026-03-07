@@ -28,7 +28,9 @@ class VicidialServiceTest {
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
         new MockEnvironment(), mock(VicidialRuntimeDataSourceFactory.class));
 
-    var result = service.dialNextWithLeadRetry("agent1", "M123456789", "M123456789", null);
+    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    session.agentUser = "agent1";
+    var result = service.dialNextWithLeadRetry("agent1", session, "M123456789", "M123456789", null);
 
     assertEquals("DIALING_NO_LEAD_YET", result.classification());
     assertNull(result.leadId());
