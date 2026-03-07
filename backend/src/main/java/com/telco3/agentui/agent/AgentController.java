@@ -115,6 +115,33 @@ public class AgentController {
     return vicidialSessionService.status(requireAuth(auth));
   }
 
+  @PostMapping("/vicidial/poll")
+  Map<String, Object> pollVicidialSession(Authentication auth) {
+    String agentUser = requireAuth(auth);
+    ensureAgentExists(agentUser);
+    var session = requireConnectedSession(agentUser);
+    String agentPass = credentialService.resolveAgentPass(agentUser)
+        .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
+            "VICIDIAL_AGENT_CREDENTIALS_MISSING",
+            "No existe agent_pass configurado para el agente.",
+            "Actualice users.agent_pass_encrypted antes de usar polling Vicidial.",
+            null));
+
+    Map<String, String> heartbeatPayload = buildVdcHeartbeatPayload(agentUser, agentPass, session, session.connectedCampaign);
+    var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
+    var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
+
+    return Map.of(
+        "ok", true,
+        "agentUser", agentUser,
+        "campaign", session.connectedCampaign,
+        "updateSettingsHttpStatus", updateSettingsResult.statusCode(),
+        "callbacksCountHttpStatus", callbackCountResult.statusCode(),
+        "updateSettingsSnippet", updateSettingsResult.snippet(180),
+        "callbacksCountSnippet", callbackCountResult.snippet(180)
+    );
+  }
+
   @GetMapping("/active-lead")
   Map<String,Object> active(Authentication auth){
     String agentUser = requireAuth(auth);
@@ -232,7 +259,21 @@ public class AgentController {
     LinkedHashMap<String, String> payload = new LinkedHashMap<>(dialRequestBuilder.buildManualDialPayload(agentUser, agentPass, session, req.campaignId(), overrides));
     payload.put("preview", "YES".equalsIgnoreCase(req.preview()) ? "YES" : "NO");
 
-    var result = vicidial.manualDialNextCall(payload);
+    var runtimeBeforeDial = vicidialService.resolveLeadFromRuntimeTables(session, session.currentCallId, null);
+    String runtimeAgentStatus = Objects.toString(runtimeBeforeDial.agentStatus(), "");
+    if ("PAUSED".equalsIgnoreCase(runtimeAgentStatus)) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_AGENT_PAUSED",
+          "El agente está en PAUSED y Vicidial no originará manual dial.",
+          "Cambie a READY/WAITING (quitar pausa) y reintente la marcación manual.",
+          Map.of("agentStatus", runtimeAgentStatus));
+    }
+
+    Map<String, String> heartbeatPayload = buildVdcHeartbeatPayload(agentUser, agentPass, session, req.campaignId());
+    var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
+    var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
+
+    var result = vicidial.manualDialNextCall(agentUser, payload);
     String raw = Objects.toString(result.body(), "");
     String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
     var parsedResponse = dialResponseParser.parse(raw);
@@ -253,6 +294,13 @@ public class AgentController {
     response.put("leadId", runtimeDialState.leadId());
     response.put("status", firstPresent(parsed, "status", "result"));
     response.put("classification", runtimeDialState.classification());
+    response.put("agentRuntimeStatus", runtimeAgentStatus.isBlank() ? "UNKNOWN" : runtimeAgentStatus);
+    response.put("preflight", Map.of(
+        "updateSettingsHttpStatus", updateSettingsResult.statusCode(),
+        "callbacksCountHttpStatus", callbackCountResult.statusCode(),
+        "updateSettingsSnippet", updateSettingsResult.snippet(180),
+        "callbacksCountSnippet", callbackCountResult.snippet(180)
+    ));
     maybeAttachDebug(response, payload, rawSnippet);
     return response;
   }
@@ -428,6 +476,30 @@ public class AgentController {
     } catch (NumberFormatException ex) {
       return null;
     }
+  }
+
+  private Map<String, String> buildVdcHeartbeatPayload(
+      String agentUser,
+      String agentPass,
+      Entities.AgentVicidialCredentialEntity session,
+      String campaignId
+  ) {
+    LinkedHashMap<String, String> payload = new LinkedHashMap<>();
+    payload.put("user", agentUser);
+    payload.put("pass", agentPass);
+    payload.put("server_ip", session.serverIp);
+    payload.put("session_name", session.sessionName);
+    payload.put("agent_user", agentUser);
+    payload.put("campaign", campaignId);
+    payload.put("phone_login", session.connectedPhoneLogin);
+    payload.put("conf_exten", firstNonBlank(session.confExten, session.connectedPhoneLogin));
+    payload.put("agent_log_id", Objects.toString(session.agentLogId, ""));
+    payload.put("format", "text");
+    return payload;
+  }
+
+  private String firstNonBlank(String value, String fallback) {
+    return value == null || value.isBlank() ? fallback : value;
   }
 
   private String firstPresent(Map<String, String> parsed, String... keys) {
