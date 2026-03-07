@@ -2,6 +2,8 @@ package com.telco3.agentui.vicidial;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -11,6 +13,8 @@ import java.util.Objects;
 
 @Component
 public class VicidialRuntimeDataSourceFactory {
+  private static final Logger log = LoggerFactory.getLogger(VicidialRuntimeDataSourceFactory.class);
+
   private final VicidialConfigService configService;
   private final String defaultDriverClassName;
   private final long ttlMillis;
@@ -19,7 +23,7 @@ public class VicidialRuntimeDataSourceFactory {
 
   public VicidialRuntimeDataSourceFactory(
       VicidialConfigService configService,
-      @Value("${vicidial.datasource.driver-class-name:com.mysql.cj.jdbc.Driver}") String defaultDriverClassName,
+      @Value("${vicidial.datasource.driver-class-name:org.mariadb.jdbc.Driver}") String defaultDriverClassName,
       @Value("${vicidial.datasource.ttl-ms:60000}") long ttlMillis
   ) {
     this.configService = configService;
@@ -30,7 +34,7 @@ public class VicidialRuntimeDataSourceFactory {
   public DataSource getOrCreate() {
     var cfg = configService.resolveDbConfig();
     if (cfg.missingRequired()) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SETTINGS_MISSING", "Falta configuración MySQL de Vicidial.", "configure en Admin > Settings", null);
+      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SETTINGS_MISSING", "Falta configuración MariaDB de Vicidial.", "configure en Admin > Settings", null);
     }
 
     long now = System.currentTimeMillis();
@@ -55,9 +59,19 @@ public class VicidialRuntimeDataSourceFactory {
   }
 
   private HikariDataSource build(VicidialConfigService.ResolvedVicidialDbConfig cfg) {
+    String jdbcUrl = buildJdbcUrl(cfg);
+    log.info(
+        "Building Vicidial datasource host={} port={} database={} driver={} jdbcUrl={}",
+        cfg.dbHost(),
+        cfg.dbPort(),
+        cfg.dbName(),
+        defaultDriverClassName,
+        jdbcUrl
+    );
+
     HikariConfig hk = new HikariConfig();
     hk.setDriverClassName(defaultDriverClassName);
-    hk.setJdbcUrl("jdbc:mysql://" + cfg.dbHost() + ":" + cfg.dbPort() + "/" + cfg.dbName() + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+    hk.setJdbcUrl(jdbcUrl);
     hk.setUsername(cfg.dbUser());
     hk.setPassword(cfg.dbPass());
     hk.setMaximumPoolSize(3);
@@ -68,6 +82,10 @@ public class VicidialRuntimeDataSourceFactory {
     hk.setIdleTimeout(60000);
     hk.setMaxLifetime(180000);
     return new HikariDataSource(hk);
+  }
+
+  private String buildJdbcUrl(VicidialConfigService.ResolvedVicidialDbConfig cfg) {
+    return "jdbc:mariadb://" + cfg.dbHost() + ":" + cfg.dbPort() + "/" + cfg.dbName();
   }
 
   public void invalidate() {
