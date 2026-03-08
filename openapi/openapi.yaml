@@ -155,6 +155,11 @@ components:
       required: [action]
       properties:
         action: { type: string, enum: [PAUSE, RESUME] }
+    HangupRequest:
+      type: object
+      properties:
+        campaignId: { type: string, nullable: true }
+        dispo: { type: string, nullable: true }
     OkResponse:
       type: object
       properties:
@@ -354,6 +359,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/vicidial/call/hangup:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HangupRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /api/vicidial/leads/import:
     post:
       security: [{ bearerAuth: [] }]

@@ -24,6 +24,7 @@ import {
   getActiveLead,
   getAgentProfile,
   getContext,
+  hangupCall,
   manualDial,
   getVicidialCampaigns,
   getVicidialStatus,
@@ -40,6 +41,7 @@ import ViciCard from '../components/ui/ViciCard';
 export default function AgentPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const defaultPhoneCode = ((import.meta as any).env?.VITE_DEFAULT_PHONE_CODE || '1').toString();
   const [dispo, setDispo] = useState('');
   const [notes, setNotes] = useState('');
   const [phoneLogin, setPhoneLogin] = useState('');
@@ -48,7 +50,7 @@ export default function AgentPage() {
   const [profileMenuAnchor, setProfileMenuAnchor] = useState<null | HTMLElement>(null);
   const [agentPass, setAgentPass] = useState('');
   const [manualNumber, setManualNumber] = useState('');
-  const [manualCode, setManualCode] = useState('51');
+  const [manualCode, setManualCode] = useState(defaultPhoneCode);
   const [dialingBanner, setDialingBanner] = useState(false);
 
   const logout = () => {
@@ -143,6 +145,16 @@ export default function AgentPage() {
     },
   });
 
+  const hangupMut = useMutation({
+    mutationFn: hangupCall,
+    onSuccess: () => {
+      setDialingBanner(false);
+      qc.invalidateQueries({ queryKey: ['active-lead'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+      qc.invalidateQueries({ queryKey: ['status'] });
+    },
+  });
+
   const retry = useMutation({ mutationFn: retryInteraction });
 
   const c: any = context.data;
@@ -172,6 +184,9 @@ export default function AgentPage() {
   const phoneConnected = Boolean(status.data?.phoneConnected);
   const campaignConnected = Boolean(status.data?.campaign);
   const canType = phoneConnected && campaignConnected;
+  const runtimeAgentStatus = String(c?.runtime?.agentStatus || active.data?.lead?.agentStatus || '').toUpperCase();
+  const runtimeCallId = c?.runtime?.callId || active.data?.lead?.callId || c?.lead?.callId || manualDialMut.data?.callId || manualNext.data?.callId;
+  const canHangup = campaignConnected && (runtimeAgentStatus === 'INCALL' || Boolean(runtimeCallId));
   const availableCampaigns = campaignsQuery.data?.campaigns || [];
 
   useEffect(() => {
@@ -455,7 +470,7 @@ export default function AgentPage() {
                       manualDialMut.mutate({
                         campaignId: status.data?.campaign || campaign || '',
                         phoneNumber: manualNumber,
-                        phoneCode: manualCode || '51',
+                        phoneCode: manualCode || defaultPhoneCode,
                         dialTimeout: 60,
                         dialPrefix: '9',
                         preview: 'NO',
@@ -477,6 +492,11 @@ export default function AgentPage() {
             {manualDialMut.data?.ok && (
               <Alert severity='success'>Llamada solicitada. Call ID: {manualDialMut.data?.callId || 'N/D'}.</Alert>
             )}
+            {hangupMut.data?.ok && <Alert severity='success'>Se envió colgado de llamada al backend/Vicidial.</Alert>}
+            {hangupMut.data && !hangupMut.data.ok && (
+              <Alert severity='info'>No se detectó llamada activa para colgar.</Alert>
+            )}
+            {hangupMut.isError && <Alert severity='error'>No fue posible ejecutar colgado de llamada.</Alert>}
 
             {isManualFlow && (
               <Stack direction={{ xs: 'column', sm: 'row' }} gap={1}>
@@ -498,6 +518,19 @@ export default function AgentPage() {
               </Button>
               <Button variant='outlined' onClick={() => pauseAction({ action: 'RESUME' })}>
                 Resume
+              </Button>
+              <Button
+                variant='contained'
+                color='error'
+                disabled={!canHangup || hangupMut.isPending}
+                onClick={() =>
+                  hangupMut.mutate({
+                    campaignId: status.data?.campaign || campaign || '',
+                    dispo: dispo || 'N',
+                  })
+                }
+              >
+                COLGAR
               </Button>
             </Stack>
           </Stack>

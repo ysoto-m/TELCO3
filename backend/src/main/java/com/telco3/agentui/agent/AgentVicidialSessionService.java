@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -151,6 +152,7 @@ public class AgentVicidialSessionService {
     credentialService.saveLastSelection(agentUser, state.phoneLogin, campaignId, remember);
     credentialService.markConnected(agentUser, state.phoneLogin, campaignId, mode);
     RuntimeSessionFields runtime = extractRuntimeSessionFields(result.body());
+    state.manualDialListId = runtime.manualDialListId();
     credentialService.updateRuntimeSession(
         agentUser,
         runtime.sessionName(),
@@ -181,8 +183,17 @@ public class AgentVicidialSessionService {
     response.put("phoneLogin", state == null ? null : state.phoneLogin);
     response.put("campaign", state == null ? null : state.campaign);
     response.put("mode", state == null ? null : state.mode);
+    response.put("manualDialListId", state == null ? null : state.manualDialListId);
     response.put("typingEnabled", state != null && state.phoneConnected && state.campaign != null);
     return response;
+  }
+
+  public Optional<String> currentManualDialListId(String agentUser) {
+    AgentVicidialState state = stateByAgent.get(agentUser);
+    if (state == null || !StringUtils.hasText(state.manualDialListId)) {
+      return Optional.empty();
+    }
+    return Optional.of(state.manualDialListId);
   }
 
   private AgentVicidialState requirePhoneConnected(String agentUser) {
@@ -248,6 +259,7 @@ public class AgentVicidialSessionService {
     String phoneLogin;
     String campaign;
     String mode;
+    String manualDialListId;
   }
 
   private RuntimeSessionFields extractRuntimeSessionFields(String rawBody) {
@@ -255,24 +267,83 @@ public class AgentVicidialSessionService {
     String sessionName = extractJsVar(safeBody, "session_name");
     String serverIp = extractJsVar(safeBody, "server_ip");
     String confExten = extractJsVar(safeBody, "conf_exten");
-    String extension = extractJsVar(safeBody, "extension");
+    String sessionId = extractJsVar(safeBody, "session_id");
+    String recordingExten = extractJsVar(safeBody, "recording_exten");
+    String extension = firstNonBlank(recordingExten, extractJsVar(safeBody, "extension"));
+    String manualDialListId = firstNonBlank(
+        extractJsVar(safeBody, "mdnLisT_id"),
+        extractJsVar(safeBody, "mdnlist_id")
+    );
     String protocol = extractJsVar(safeBody, "protocol");
     Long agentLogId = parseLong(extractJsVar(safeBody, "agent_log_id"));
-    return new RuntimeSessionFields(sessionName, serverIp, confExten, extension, protocol, agentLogId);
+    if (!StringUtils.hasText(confExten)) {
+      confExten = sessionId;
+    }
+    confExten = sanitizeRuntimeValue(confExten);
+    extension = sanitizeRuntimeValue(extension);
+    manualDialListId = sanitizeRuntimeValue(manualDialListId);
+    protocol = sanitizeRuntimeValue(protocol);
+    return new RuntimeSessionFields(sessionName, serverIp, confExten, extension, manualDialListId, protocol, agentLogId);
+  }
+
+  private String firstNonBlank(String... values) {
+    for (String value : values) {
+      if (StringUtils.hasText(value)) {
+        return value;
+      }
+    }
+    return null;
   }
 
   private String extractJsVar(String html, String field) {
-    Pattern quoted = Pattern.compile("(?:var\\s+)?" + Pattern.quote(field) + "\\s*=\\s*['\"]([^'\"]+)['\"]", Pattern.CASE_INSENSITIVE);
+    Pattern quoted = Pattern.compile("(?:\\bvar\\s+)?\\b" + Pattern.quote(field) + "\\b\\s*=\\s*['\"]([^'\"\\r\\n]+)['\"]", Pattern.CASE_INSENSITIVE);
     Matcher quotedMatcher = quoted.matcher(html);
     if (quotedMatcher.find()) {
-      return quotedMatcher.group(1).trim();
+      String value = quotedMatcher.group(1).trim();
+      return sanitizeRuntimeValue(value);
     }
-    Pattern unquoted = Pattern.compile("(?:var\\s+)?" + Pattern.quote(field) + "\\s*=\\s*([0-9]+)", Pattern.CASE_INSENSITIVE);
+    Pattern unquoted = Pattern.compile("(?:\\bvar\\s+)?\\b" + Pattern.quote(field) + "\\b\\s*=\\s*([0-9]+)", Pattern.CASE_INSENSITIVE);
     Matcher unquotedMatcher = unquoted.matcher(html);
     if (unquotedMatcher.find()) {
-      return unquotedMatcher.group(1).trim();
+      String value = unquotedMatcher.group(1).trim();
+      return sanitizeRuntimeValue(value);
+    }
+    Pattern inputValue = Pattern.compile(
+        "(?:name|id)\\s*=\\s*['\"]" + Pattern.quote(field) + "['\"][^>]*?value\\s*=\\s*['\"]([^'\"]+)['\"]",
+        Pattern.CASE_INSENSITIVE
+    );
+    Matcher inputValueMatcher = inputValue.matcher(html);
+    if (inputValueMatcher.find()) {
+      String value = inputValueMatcher.group(1).trim();
+      return sanitizeRuntimeValue(value);
+    }
+    Pattern inputValueReverse = Pattern.compile(
+        "value\\s*=\\s*['\"]([^'\"]+)['\"][^>]*?(?:name|id)\\s*=\\s*['\"]" + Pattern.quote(field) + "['\"]",
+        Pattern.CASE_INSENSITIVE
+    );
+    Matcher inputValueReverseMatcher = inputValueReverse.matcher(html);
+    if (inputValueReverseMatcher.find()) {
+      String value = inputValueReverseMatcher.group(1).trim();
+      return sanitizeRuntimeValue(value);
     }
     return null;
+  }
+
+  private String sanitizeRuntimeValue(String value) {
+    String candidate = Objects.toString(value, "").trim();
+    if (!StringUtils.hasText(candidate)) {
+      return null;
+    }
+    String normalized = candidate.toLowerCase(Locale.ROOT);
+    if (normalized.contains("taskconfnum")
+        || normalized.contains("session_id")
+        || normalized.contains("undefined")
+        || normalized.contains("null")
+        || candidate.contains("+")
+        || candidate.contains("&")) {
+      return null;
+    }
+    return candidate;
   }
 
   private Long parseLong(String value) {
@@ -286,6 +357,14 @@ public class AgentVicidialSessionService {
     }
   }
 
-  private record RuntimeSessionFields(String sessionName, String serverIp, String confExten, String extension, String protocol, Long agentLogId) {
+  private record RuntimeSessionFields(
+      String sessionName,
+      String serverIp,
+      String confExten,
+      String extension,
+      String manualDialListId,
+      String protocol,
+      Long agentLogId
+  ) {
   }
 }

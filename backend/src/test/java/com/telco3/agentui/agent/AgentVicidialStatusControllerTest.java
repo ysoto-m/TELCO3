@@ -207,9 +207,23 @@ class AgentVicidialStatusControllerTest {
     when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
     when(vicidialDialRequestBuilder.buildDialNextPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenReturn(new LinkedHashMap<>(Map.of("ACTION", "manDiaLnextCaLL")));
-    when(vicidialDialResponseParser.parse(org.mockito.ArgumentMatchers.anyString()))
-        .thenReturn(new VicidialDialResponseParser.ParsedDialResponse(VicidialDialResponseParser.DialClassification.RELOGIN_REQUIRED, false, null, null));
-    when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.anyMap()))
+    when(vicidialService.resolveRealtimeCallSnapshot(
+        org.mockito.ArgumentMatchers.eq("agent1"),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.eq(true)))
+        .thenReturn(realtimeSnapshot("NO_ACTIVE_LEAD", "READY", null, null, null, null));
+    when(vicidialClient.callbacksCount(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "CB=0"));
+    when(vicidialClient.updateSettings(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "OK"));
+    when(vicidialDialResponseParser.parseDetailed(org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(new VicidialDialResponseParser.DetailedParsedDialResponse(
+            VicidialDialResponseParser.DialClassification.RELOGIN_REQUIRED, false, null, null, null, null, null, Map.of()));
+    when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
         .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: agent_user is not logged in"));
 
     mockMvc.perform(post("/api/agent/vicidial/dial/next")
@@ -221,7 +235,7 @@ class AgentVicidialStatusControllerTest {
 
   @Test
   @WithMockUser(username = "agent1")
-  void manualNextPermissionDeniedMapsUnauthorizedBusinessError() throws Exception {
+  void manualNextPermissionDeniedMapsInvalidSessionBusinessError() throws Exception {
     var user = new com.telco3.agentui.domain.Entities.UserEntity();
     user.username = "agent1";
     var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
@@ -237,16 +251,30 @@ class AgentVicidialStatusControllerTest {
     when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
     when(vicidialDialRequestBuilder.buildDialNextPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenReturn(new LinkedHashMap<>(Map.of("ACTION", "manDiaLnextCaLL")));
-    when(vicidialDialResponseParser.parse(org.mockito.ArgumentMatchers.anyString()))
-        .thenReturn(new VicidialDialResponseParser.ParsedDialResponse(VicidialDialResponseParser.DialClassification.INVALID_SESSION, false, null, null));
-    when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.anyMap()))
+    when(vicidialService.resolveRealtimeCallSnapshot(
+        org.mockito.ArgumentMatchers.eq("agent1"),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.eq(true)))
+        .thenReturn(realtimeSnapshot("NO_ACTIVE_LEAD", "READY", null, null, null, null));
+    when(vicidialClient.callbacksCount(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "CB=0"));
+    when(vicidialClient.updateSettings(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "OK"));
+    when(vicidialDialResponseParser.parseDetailed(org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(new VicidialDialResponseParser.DetailedParsedDialResponse(
+            VicidialDialResponseParser.DialClassification.INVALID_SESSION, false, null, null, null, null, null, Map.of()));
+    when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
         .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: auth USER DOES NOT HAVE PERMISSION TO PERFORM FUNCTION"));
 
     mockMvc.perform(post("/api/agent/vicidial/dial/next")
             .contentType("application/json")
             .content("{\"campaignId\":\"Manual\",\"mode\":\"manual\"}"))
-        .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.code").value("VICIDIAL_RELOGIN_REQUIRED"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_INVALID_SESSION"));
   }
 
   @Test
@@ -295,16 +323,24 @@ class AgentVicidialStatusControllerTest {
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
     when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
     when(vicidialService.resolveModeForCampaign("agent1", "Manual2")).thenReturn("manual");
-    when(vicidialService.resolveLeadFromRuntimeTables(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
-        .thenReturn(new VicidialService.RuntimeLeadResolution(null, null, null, null, Map.of()));
     when(vicidialDialRequestBuilder.buildManualDialPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenReturn(new LinkedHashMap<>(Map.of("ACTION", "manDiaLnextCaLL")));
+    when(vicidialService.resolveRealtimeCallSnapshot(
+        org.mockito.ArgumentMatchers.eq("agent1"),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.eq(true)))
+        .thenReturn(realtimeSnapshot("NO_ACTIVE_LEAD", "READY", null, null, null, null));
     when(vicidialClient.updateSettings(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
         .thenReturn(new VicidialClient.VicidialHttpResult(200, "OK"));
     when(vicidialClient.callbacksCount(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
         .thenReturn(new VicidialClient.VicidialHttpResult(200, "CB=0"));
-    when(vicidialDialResponseParser.parse(org.mockito.ArgumentMatchers.anyString()))
-        .thenReturn(new VicidialDialResponseParser.ParsedDialResponse(VicidialDialResponseParser.DialClassification.RELOGIN_REQUIRED, false, null, null));
+    when(vicidialDialResponseParser.parseDetailed(org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(new VicidialDialResponseParser.DetailedParsedDialResponse(
+            VicidialDialResponseParser.DialClassification.RELOGIN_REQUIRED, false, null, null, null, null, null, Map.of()));
     when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
         .thenReturn(new VicidialClient.VicidialHttpResult(200, "ERROR: agent_user is not logged in"));
 
@@ -317,7 +353,7 @@ class AgentVicidialStatusControllerTest {
 
   @Test
   @WithMockUser(username = "agent1")
-  void manualDialWhenAgentPausedReturnsConflict() throws Exception {
+  void manualDialPausedSignalDoesNotShortCircuitFlow() throws Exception {
     var user = new com.telco3.agentui.domain.Entities.UserEntity();
     user.username = "agent1";
     var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
@@ -332,14 +368,74 @@ class AgentVicidialStatusControllerTest {
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
     when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
     when(vicidialService.resolveModeForCampaign("agent1", "Manual2")).thenReturn("manual");
-    when(vicidialService.resolveLeadFromRuntimeTables(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.isNull()))
-        .thenReturn(new VicidialService.RuntimeLeadResolution(null, null, "Manual", "PAUSED", Map.of("source", "vicidial_live_agents")));
+    when(vicidialDialRequestBuilder.buildManualDialPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(new LinkedHashMap<>(Map.of("ACTION", "manDiaLnextCaLL")));
+    when(vicidialService.resolveRealtimeCallSnapshot(
+        org.mockito.ArgumentMatchers.eq("agent1"),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.eq(true)))
+        .thenReturn(realtimeSnapshot("NO_ACTIVE_LEAD", "READY", null, null, null, null));
+    when(vicidialClient.updateSettings(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "OK"));
+    when(vicidialClient.callbacksCount(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "CB=0"));
+    when(vicidialClient.manualDialNextCall(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.anyMap()))
+        .thenReturn(new VicidialClient.VicidialHttpResult(200, "call_id=M1"));
+    when(vicidialDialResponseParser.parseDetailed(org.mockito.ArgumentMatchers.anyString()))
+        .thenReturn(new VicidialDialResponseParser.DetailedParsedDialResponse(
+            VicidialDialResponseParser.DialClassification.SUCCESS, true, "M1", null, "970222277", null, null, Map.of()));
+    when(vicidialService.followUpManualDial(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("Manual2"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("970222277")))
+        .thenReturn(new VicidialService.DialFollowUpResult(
+            false, "AGENT_PAUSED", "M1", null, null, null, "970222277", null, null, "PAUSED", Map.of("confExtenCheckAttempt", 3)));
 
     mockMvc.perform(post("/api/agent/vicidial/dial/manual")
             .contentType("application/json")
             .content("{\"campaignId\":\"Manual2\",\"phoneNumber\":\"970222277\"}"))
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("VICIDIAL_AGENT_PAUSED"));
+        .andExpect(jsonPath("$.code").value("VICIDIAL_DIAL_NOT_CONFIRMED"))
+        .andExpect(jsonPath("$.details.classification").value("AGENT_PAUSED"));
+  }
+
+  @Test
+  @WithMockUser(username = "agent1")
+  void manualDialWhenAlreadyIncallReturnsAgentIncall() throws Exception {
+    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    user.username = "agent1";
+    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    session.connected = true;
+    session.connectedPhoneLogin = "1001";
+    session.connectedCampaign = "Manual";
+    session.sessionName = "sess";
+    session.serverIp = "10.10.10.10";
+    session.agentLogId = 99L;
+    session.currentCallId = "M3071904310000001202";
+    session.currentLeadId = 1202L;
+
+    when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
+    when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.of(session));
+    when(vicidialCredentialService.resolveAgentPass("agent1")).thenReturn(Optional.of("secret"));
+    when(vicidialService.resolveModeForCampaign("agent1", "Manual2")).thenReturn("manual");
+    when(vicidialDialRequestBuilder.buildManualDialPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(new LinkedHashMap<>(Map.of("ACTION", "manDiaLnextCaLL")));
+    when(vicidialService.resolveRealtimeCallSnapshot(
+        org.mockito.ArgumentMatchers.eq("agent1"),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.eq(true)))
+        .thenReturn(realtimeSnapshot("READY", "INCALL", "M3071904310000001202", 1202L, "1772928343.90", "SIP/trunk220_24-00000025"));
+
+    mockMvc.perform(post("/api/agent/vicidial/dial/manual")
+            .contentType("application/json")
+            .content("{\"campaignId\":\"Manual2\",\"phoneNumber\":\"970222277\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("VICIDIAL_AGENT_INCALL"));
   }
 
   @Test
@@ -382,6 +478,29 @@ class AgentVicidialStatusControllerTest {
     mockMvc.perform(get("/api/agent/context"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("VICIDIAL_NOT_CONNECTED"));
+  }
+
+  private VicidialService.RealtimeCallSnapshot realtimeSnapshot(
+      String classification,
+      String agentStatus,
+      String callId,
+      Long leadId,
+      String uniqueId,
+      String channel
+  ) {
+    return new VicidialService.RealtimeCallSnapshot(
+        false,
+        200,
+        classification,
+        agentStatus,
+        callId,
+        leadId,
+        null,
+        "Manual2",
+        uniqueId,
+        channel,
+        Map.of()
+    );
   }
 
 }

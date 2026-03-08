@@ -29,6 +29,7 @@ app:
     debug: ${APP_VICIDIAL_DEBUG:false}
     dial:
       campaign-aliases: {}
+      default-phone-code: ${APP_VICIDIAL_DIAL_DEFAULT_PHONE_CODE:1}
 vicidial:
   http:
     connect-timeout-ms: ${VICIDIAL_HTTP_CONNECT_TIMEOUT_MS:4000}

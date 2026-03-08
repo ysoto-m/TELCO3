@@ -9,10 +9,13 @@ import com.telco3.agentui.vicidial.VicidialDialResponseParser;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialService;
 import jakarta.validation.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -20,6 +23,7 @@ import java.util.*;
 
 @RestController @RequestMapping("/api/agent")
 public class AgentController {
+  private static final Logger log = LoggerFactory.getLogger(AgentController.class);
   private final VicidialClient vicidial;
   private final InteractionRepository interactions;
   private final CustomerRepository customers;
@@ -71,6 +75,7 @@ public class AgentController {
   public record CampaignConnectReq(@NotBlank String campaignId, Boolean rememberCredentials) {}
   public record DialNextReq(@NotBlank String campaignId) {}
   public record ManualDialReq(@NotBlank String campaignId, @NotBlank String phoneNumber, String phoneCode, Integer dialTimeout, String dialPrefix, String preview) {}
+  public record HangupReq(String campaignId, String dispo) {}
   public record InteractionReq(@NotBlank String mode,Long leadId,@NotBlank String phoneNumber,@NotBlank String campaign,@NotBlank String dni,@NotBlank String dispo,String notes,Map<String,Object> extra){}
 
   @GetMapping("/profile")
@@ -128,8 +133,8 @@ public class AgentController {
             null));
 
     Map<String, String> heartbeatPayload = buildVdcHeartbeatPayload(agentUser, agentPass, session, session.connectedCampaign);
-    var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
     var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
+    var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
 
     return Map.of(
         "ok", true,
@@ -192,9 +197,14 @@ public class AgentController {
     lead.put("leadId", state.leadId());
     lead.put("phoneNumber", state.phoneNumber());
     lead.put("campaign", state.campaign());
+    lead.put("callId", state.details().get("callId"));
+    lead.put("uniqueId", state.details().get("uniqueId"));
+    lead.put("channel", state.details().get("channel"));
+    lead.put("agentStatus", state.details().get("agentStatus"));
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", true);
     response.put("lead", lead);
+    response.put("runtime", state.details());
     return response;
   }
 
@@ -207,30 +217,22 @@ public class AgentController {
         .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
             "VICIDIAL_AGENT_CREDENTIALS_MISSING",
             "No existe agent_pass configurado para el agente.",
-            "Actualice users.agent_pass_encrypted antes de usar marcación manual.",
+            "Actualice users.agent_pass_encrypted antes de usar marcacion manual.",
             null));
 
     String resolvedMode = vicidialService.resolveModeForCampaign(agentUser, req.campaignId());
     Map<String, String> payload = dialRequestBuilder.buildDialNextPayload(agentUser, agentPass, session, req.campaignId());
-    var result = vicidial.manualDialNextCall(payload);
-    String raw = Objects.toString(result.body(), "");
-    String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
-    var parsed = dialResponseParser.parse(raw);
-
-    if (!parsed.success()) {
-      throw dialBusinessException("VICIDIAL_MANUAL_NEXT_FAILED", result.statusCode(), parsed.classification(), rawSnippet, payload,
-          "Vicidial no confirmó la marcación manual siguiente.");
-    }
-
-    var dialState = vicidialService.dialNextWithLeadRetry(agentUser, session, raw, parsed.callId(), parsed.leadId());
-
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("ok", true);
-    response.put("result", Map.of("code", "VICIDIAL_DIAL_NEXT_OK", "campaign", payload.get("campaign"), "mode", resolvedMode, "classification", dialState.classification()));
-    response.put("callId", dialState.callId());
-    response.put("leadId", dialState.leadId());
-    maybeAttachDebug(response, payload, rawSnippet);
-    return response;
+    return executeDialFlow(
+        agentUser,
+        agentPass,
+        session,
+        req.campaignId(),
+        resolvedMode,
+        payload,
+        null,
+        "VICIDIAL_MANUAL_NEXT_FAILED",
+        "Vicidial no confirmo la marcacion manual siguiente."
+    );
   }
 
   @PostMapping("/vicidial/manual/next")
@@ -247,62 +249,160 @@ public class AgentController {
         .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
             "VICIDIAL_AGENT_CREDENTIALS_MISSING",
             "No existe agent_pass configurado para el agente.",
-            "Actualice users.agent_pass_encrypted antes de usar marcación manual.",
+            "Actualice users.agent_pass_encrypted antes de usar marcacion manual.",
             null));
 
     String mode = vicidialService.resolveModeForCampaign(agentUser, req.campaignId());
     if (!"manual".equalsIgnoreCase(mode)) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_MODE_NOT_MANUAL", "La campaña no está en modo manual.", "Use una campaña con dial_method MANUAL para marcación manual.", Map.of("mode", mode));
+      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_MODE_NOT_MANUAL", "La campana no esta en modo manual.", "Use una campana con dial_method MANUAL para marcacion manual.", Map.of("mode", mode));
     }
 
     var overrides = new VicidialDialRequestBuilder.ManualDialOverrides(req.phoneNumber(), req.phoneCode(), req.dialTimeout(), req.dialPrefix());
     LinkedHashMap<String, String> payload = new LinkedHashMap<>(dialRequestBuilder.buildManualDialPayload(agentUser, agentPass, session, req.campaignId(), overrides));
     payload.put("preview", "YES".equalsIgnoreCase(req.preview()) ? "YES" : "NO");
 
-    var runtimeBeforeDial = vicidialService.resolveLeadFromRuntimeTables(session, session.currentCallId, null);
-    String runtimeAgentStatus = Objects.toString(runtimeBeforeDial.agentStatus(), "");
-    if ("PAUSED".equalsIgnoreCase(runtimeAgentStatus)) {
+    return executeDialFlow(
+        agentUser,
+        agentPass,
+        session,
+        req.campaignId(),
+        mode,
+        payload,
+        req.phoneNumber(),
+        "VICIDIAL_MANUAL_DIAL_FAILED",
+        "Vicidial no confirmo la marcacion manual."
+    );
+  }
+
+  private Map<String, Object> executeDialFlow(
+      String agentUser,
+      String agentPass,
+      Entities.AgentVicidialCredentialEntity session,
+      String campaignId,
+      String mode,
+      Map<String, String> payload,
+      String requestedPhoneNumber,
+      String failureCode,
+      String failureMessage
+  ) {
+    enrichManualDialListId(agentUser, campaignId, payload);
+    var realtimeBeforeDial = vicidialService.resolveRealtimeCallSnapshot(
+        agentUser,
+        session,
+        session.currentCallId,
+        session.currentLeadId,
+        requestedPhoneNumber,
+        campaignId,
+        true
+    );
+    String activeCallId = firstNonBlank(realtimeBeforeDial.callId(), session.currentCallId);
+    boolean hasMediaEvidence = firstNonBlank(realtimeBeforeDial.uniqueId(), realtimeBeforeDial.channel()) != null;
+    boolean runtimeMarkedActive = "ACTIVE".equalsIgnoreCase(Objects.toString(session.currentDialStatus, ""));
+    boolean hasActiveCallEvidence = hasMediaEvidence || (runtimeMarkedActive && activeCallId != null);
+    if (isInCallStatus(realtimeBeforeDial.agentStatus()) && hasActiveCallEvidence) {
+      Map<String, Object> details = new LinkedHashMap<>();
+      details.put("classification", realtimeBeforeDial.classification());
+      details.put("agentStatus", realtimeBeforeDial.agentStatus());
+      details.put("callId", activeCallId);
+      details.put("leadId", realtimeBeforeDial.leadId());
+      details.put("uniqueId", realtimeBeforeDial.uniqueId());
+      details.put("channel", realtimeBeforeDial.channel());
+      if (realtimeBeforeDial.details() != null && !realtimeBeforeDial.details().isEmpty()) {
+        details.put("runtime", realtimeBeforeDial.details());
+      }
       throw new VicidialServiceException(HttpStatus.CONFLICT,
-          "VICIDIAL_AGENT_PAUSED",
-          "El agente está en PAUSED y Vicidial no originará manual dial.",
-          "Cambie a READY/WAITING (quitar pausa) y reintente la marcación manual.",
-          Map.of("agentStatus", runtimeAgentStatus));
+          "VICIDIAL_AGENT_INCALL",
+          "El agente ya tiene una llamada activa (INCALL).",
+          "Finalice/disponibilice la llamada actual antes de iniciar otra marcacion manual.",
+          details);
     }
 
-    Map<String, String> heartbeatPayload = buildVdcHeartbeatPayload(agentUser, agentPass, session, req.campaignId());
-    var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
+    Map<String, String> heartbeatPayload = buildVdcHeartbeatPayload(agentUser, agentPass, session, campaignId);
     var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
+    var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
 
     var result = vicidial.manualDialNextCall(agentUser, payload);
     String raw = Objects.toString(result.body(), "");
     String rawSnippet = raw.substring(0, Math.min(raw.length(), 800));
-    var parsedResponse = dialResponseParser.parse(raw);
+    var parsed = dialResponseParser.parseDetailed(raw);
 
-    if (!parsedResponse.success()) {
-      throw dialBusinessException("VICIDIAL_MANUAL_DIAL_FAILED", result.statusCode(), parsedResponse.classification(), rawSnippet, payload,
-          "Vicidial no confirmó la marcación manual.");
+    if (!parsed.success()) {
+      throw dialBusinessException(failureCode, result.statusCode(), parsed.classification(), rawSnippet, payload, failureMessage);
     }
 
-    Map<String, String> parsed = vicidial.parseKeyValueLines(raw);
-    String resolvedCallId = parsedResponse.callId() == null ? firstPresent(parsed, "call_id", "callid", "callerid") : parsedResponse.callId();
-    Long parsedLeadId = parsedResponse.leadId() == null ? toLong(firstPresent(parsed, "lead_id", "leadid")) : parsedResponse.leadId();
-    var runtimeDialState = vicidialService.resolveManualDialLead(agentUser, session, resolvedCallId, parsedLeadId, req.phoneNumber());
+    var followUp = vicidialService.followUpManualDial(agentUser, agentPass, session, campaignId, parsed, requestedPhoneNumber);
+    if (!followUp.incallConfirmed()) {
+      Map<String, Object> details = new LinkedHashMap<>();
+      details.put("classification", followUp.classification());
+      details.put("agentStatus", followUp.agentStatus());
+      details.put("callId", followUp.callId());
+      details.put("leadId", followUp.leadId());
+      details.put("uniqueId", followUp.uniqueId());
+      details.put("channel", followUp.channel());
+      details.put("preflight", Map.of(
+          "callbacksCountHttpStatus", callbackCountResult.statusCode(),
+          "updateSettingsHttpStatus", updateSettingsResult.statusCode()
+      ));
+      if (followUp.details() != null && !followUp.details().isEmpty()) {
+        details.putAll(followUp.details());
+      }
+      if (debugAllowed()) {
+        details.put("rawSnippet", rawSnippet);
+        details.put("debugRequest", maskedUrlEncodedPayload(payload));
+      }
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_DIAL_NOT_CONFIRMED",
+          "Vicidial no confirmo transicion real a INCALL despues de manDiaLnextCaLL.",
+          "Verifique estado READY/PAUSED, sesion de agente y flujo AGC conf_exten_check.",
+          details);
+    }
 
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", true);
-    response.put("callId", runtimeDialState.callId());
-    response.put("leadId", runtimeDialState.leadId());
-    response.put("status", firstPresent(parsed, "status", "result"));
-    response.put("classification", runtimeDialState.classification());
-    response.put("agentRuntimeStatus", runtimeAgentStatus.isBlank() ? "UNKNOWN" : runtimeAgentStatus);
-    response.put("preflight", Map.of(
-        "updateSettingsHttpStatus", updateSettingsResult.statusCode(),
-        "callbacksCountHttpStatus", callbackCountResult.statusCode(),
-        "updateSettingsSnippet", updateSettingsResult.snippet(180),
-        "callbacksCountSnippet", callbackCountResult.snippet(180)
+    response.put("result", Map.of(
+        "code", "VICIDIAL_DIAL_NEXT_OK",
+        "campaign", Objects.toString(payload.get("campaign"), campaignId),
+        "mode", mode,
+        "classification", followUp.classification()
     ));
+    response.put("callId", followUp.callId());
+    response.put("leadId", followUp.leadId());
+    response.put("phoneNumber", followUp.phoneNumber());
+    response.put("status", firstNonBlank(parsed.leadStatus(), followUp.leadStatus()));
+    response.put("listId", firstNonBlank(parsed.listId(), followUp.listId(), payload.get("list_id")));
+    response.put("classification", followUp.classification());
+    response.put("agentStatus", followUp.agentStatus());
+    response.put("agentRuntimeStatus", followUp.agentStatus());
+    response.put("uniqueId", followUp.uniqueId());
+    response.put("channel", followUp.channel());
+    response.put("preflight", Map.of(
+        "callbacksCountHttpStatus", callbackCountResult.statusCode(),
+        "updateSettingsHttpStatus", updateSettingsResult.statusCode(),
+        "callbacksCountSnippet", callbackCountResult.snippet(180),
+        "updateSettingsSnippet", updateSettingsResult.snippet(180)
+    ));
+    if (followUp.details() != null && !followUp.details().isEmpty()) {
+      response.put("details", new LinkedHashMap<>(followUp.details()));
+    }
     maybeAttachDebug(response, payload, rawSnippet);
     return response;
+  }
+
+  private void enrichManualDialListId(String agentUser, String campaignId, Map<String, String> payload) {
+    if (!payload.containsKey("list_id") || StringUtils.hasText(payload.get("list_id"))) {
+      return;
+    }
+    Optional<String> runtimeListId = Optional.ofNullable(vicidialSessionService.currentManualDialListId(agentUser))
+        .orElse(Optional.empty());
+    Optional<String> campaignListId = Optional.ofNullable(
+        vicidialService.resolveManualDialListId(firstNonBlank(payload.get("campaign"), campaignId))
+    ).orElse(Optional.empty());
+    String resolvedListId = runtimeListId.filter(StringUtils::hasText).orElseGet(() ->
+        campaignListId.orElse(null)
+    );
+    if (StringUtils.hasText(resolvedListId)) {
+      payload.put("list_id", resolvedListId);
+    }
   }
 
   @GetMapping("/context")
@@ -315,73 +415,87 @@ public class AgentController {
     requireSessionField(session.serverIp, "server_ip");
     requireSessionField(session.sessionName, "session_name");
     if (session.agentLogId == null) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesión Vicidial está incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
+      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesion Vicidial esta incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
     }
 
-    Long resolvedLeadId = leadId;
-    if (resolvedLeadId == null) {
-      var leadResult = vicidial.activeLeadSafe(agentUser);
-      if (leadResult.outcome() == VicidialClient.ActiveLeadOutcome.RELOGIN_REQUIRED) {
-        throw new VicidialServiceException(HttpStatus.CONFLICT,
-            "VICIDIAL_RELOGIN_REQUIRED",
-            "La sesión de Vicidial requiere re-login.",
-            "Conecte anexo/campaña nuevamente para continuar.",
-            null);
-      }
-      if (leadResult.outcome() != VicidialClient.ActiveLeadOutcome.SUCCESS) {
-        var runtimeLead = vicidialService.resolveLeadFromRuntimeTables(session, session.currentCallId, null);
-        resolvedLeadId = runtimeLead.leadId();
-      } else {
-        resolvedLeadId = extractLong(leadResult.rawBody(), "lead_id");
-      }
+    var realtime = vicidialService.resolveRealtimeCallSnapshot(
+        agentUser,
+        session,
+        session.currentCallId,
+        session.currentLeadId,
+        null,
+        session.connectedCampaign,
+        true
+    );
+    if (realtime.reloginRequired()) {
+      throw new VicidialServiceException(HttpStatus.CONFLICT,
+          "VICIDIAL_RELOGIN_REQUIRED",
+          "La sesion de Vicidial requiere re-login.",
+          "Conecte anexo/campana nuevamente para continuar.",
+          null);
     }
 
+    Long resolvedLeadId = leadId != null ? leadId : realtime.leadId();
     if (resolvedLeadId == null) {
       Map<String, Object> response = new LinkedHashMap<>();
       response.put("ok", true);
       response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
       response.put("lead", null);
+      response.put("runtime", runtimePayload(realtime));
       return response;
     }
 
     String data = vicidial.leadInfo(resolvedLeadId);
-    String dni = extract(data,"vendor_lead_code");
+    String dni = extract(data, "vendor_lead_code");
     if (dni == null || dni.isBlank()) {
       Map<String, Object> response = new LinkedHashMap<>();
       response.put("ok", true);
       response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
       response.put("lead", Map.of("leadId", resolvedLeadId));
+      response.put("runtime", runtimePayload(realtime));
       response.put("customer", null);
       response.put("phones", List.of());
       response.put("interactions", List.of());
       response.put("dispoOptions", List.of("SALE", "NOANS", "CALLBK", "DNC"));
       return response;
     }
-    var c = customers.findByDni(dni).orElseGet(()->{var nc=new CustomerEntity(); nc.dni=dni; nc.firstName="TODO"; nc.lastName="TODO"; return nc;});
+
+    var c = customers.findByDni(dni).orElseGet(() -> {
+      var nc = new CustomerEntity();
+      nc.dni = dni;
+      nc.firstName = "TODO";
+      nc.lastName = "TODO";
+      return nc;
+    });
     List<Map<String,Object>> ph =
-    c.id == null
-        ? List.<Map<String, Object>>of()
-        : phones.findByCustomerId(c.id).stream()
-            .map(p -> Map.<String, Object>of(
-                "phoneNumber", p.phoneNumber,
-                "isPrimary", p.isPrimary
+        c.id == null
+            ? List.<Map<String, Object>>of()
+            : phones.findByCustomerId(c.id).stream()
+                .map(p -> Map.<String, Object>of(
+                    "phoneNumber", p.phoneNumber,
+                    "isPrimary", p.isPrimary
+                ))
+                .toList();
+    var hist =
+        interactions.findTop20ByDniOrderByCreatedAtDesc(dni).stream()
+            .map(i -> Map.<String, Object>of(
+                "id", i.id,
+                "dispo", i.dispo,
+                "notes", Objects.toString(i.notes, ""),
+                "createdAt", i.createdAt,
+                "syncStatus", i.syncStatus.name()
             ))
             .toList();
-    var hist =
-    interactions.findTop20ByDniOrderByCreatedAtDesc(dni).stream()
-        .map(i -> Map.<String, Object>of(
-            "id", i.id,
-            "dispo", i.dispo,
-            "notes", Objects.toString(i.notes, ""),
-            "createdAt", i.createdAt,
-            "syncStatus", i.syncStatus.name()
-        ))
-        .toList();
+
     Map<String, Object> lead = new LinkedHashMap<>();
     lead.put("leadId", resolvedLeadId);
     lead.put("phoneNumber", extract(data, "phone_number"));
     lead.put("campaign", extract(data, "campaign_id"));
     lead.put("dni", dni);
+    lead.put("callId", firstNonBlank(realtime.callId(), session.currentCallId));
+    lead.put("uniqueId", realtime.uniqueId());
+    lead.put("channel", realtime.channel());
+    lead.put("agentStatus", realtime.agentStatus());
 
     Map<String, Object> customer = new LinkedHashMap<>();
     customer.put("dni", dni);
@@ -391,6 +505,7 @@ public class AgentController {
     Map<String, Object> response = new LinkedHashMap<>();
     response.putAll(contextPayload(session.connectedMode, session.connectedCampaign, session.connectedPhoneLogin, agentUser));
     response.put("lead", lead);
+    response.put("runtime", runtimePayload(realtime));
     response.put("customer", customer);
     response.put("phones", ph);
     response.put("interactions", hist);
@@ -401,12 +516,41 @@ public class AgentController {
   @PostMapping("/interactions")
   Map<String,Object> save(@RequestBody InteractionReq req, Authentication auth) throws Exception {
     String agentUser = requireAuth(auth);
-    var i=new InteractionEntity(); i.agentUser=agentUser; i.mode=req.mode(); i.leadId=req.leadId(); i.phoneNumber=req.phoneNumber(); i.campaign=req.campaign(); i.dni=req.dni(); i.dispo=req.dispo(); i.notes=req.notes(); i.createdAt=OffsetDateTime.now(); i.extraJson=mapper.writeValueAsString(req.extra()==null?Map.of():req.extra());
-    customers.findByDni(req.dni()).ifPresent(c->i.customerId=c.id);
-    try { vicidial.externalStatus(agentUser,req.dispo(),req.leadId(),req.campaign()); i.syncStatus=SyncStatus.SYNCED; i.lastError=null; }
-    catch (Exception e){ i.syncStatus=SyncStatus.FAILED; i.lastError=e.getMessage(); }
+    var i = new InteractionEntity();
+    i.agentUser = agentUser;
+    i.mode = req.mode();
+    i.leadId = req.leadId();
+    i.phoneNumber = req.phoneNumber();
+    i.campaign = req.campaign();
+    i.dni = req.dni();
+    i.dispo = req.dispo();
+    i.notes = req.notes();
+    i.createdAt = OffsetDateTime.now();
+    i.extraJson = mapper.writeValueAsString(req.extra() == null ? Map.of() : req.extra());
+    customers.findByDni(req.dni()).ifPresent(c -> i.customerId = c.id);
+
+    agentVicidialCredentialRepository.findByAppUsername(agentUser)
+        .filter(s -> s.connected)
+        .ifPresent(session -> {
+          credentialService.resolveAgentPass(agentUser).ifPresent(agentPass -> {
+            try {
+              vicidialService.manualDialLogEnd(agentUser, agentPass, session, req.campaign(), req.leadId(), req.dispo());
+            } catch (Exception ex) {
+              log.warn("Vicidial manDiaLlogCaLL stage=end failed agent={} cause={}", agentUser, ex.getClass().getSimpleName());
+            }
+          });
+        });
+
+    try {
+      vicidial.externalStatus(agentUser, req.dispo(), req.leadId(), req.campaign());
+      i.syncStatus = SyncStatus.SYNCED;
+      i.lastError = null;
+    } catch (Exception e) {
+      i.syncStatus = SyncStatus.FAILED;
+      i.lastError = e.getMessage();
+    }
     interactions.save(i);
-    return Map.of("id",i.id,"syncStatus",i.syncStatus.name(),"message",i.syncStatus==SyncStatus.SYNCED?"Synced":"Saved locally");
+    return Map.of("id", i.id, "syncStatus", i.syncStatus.name(), "message", i.syncStatus == SyncStatus.SYNCED ? "Synced" : "Saved locally");
   }
 
   @PostMapping("/interactions/{id}/retry-vicidial")
@@ -420,6 +564,32 @@ public class AgentController {
 
   public record PreviewReq(Long leadId,String campaign,String action){}
   @PostMapping("/preview-action") Map<String,Object> preview(@RequestBody PreviewReq req, Authentication auth){ vicidial.previewAction(requireAuth(auth),req.leadId(),req.campaign(),req.action()); return Map.of("ok",true); }
+  @PostMapping("/vicidial/call/hangup")
+  Map<String, Object> hangupCall(@RequestBody(required = false) HangupReq req, Authentication auth) {
+    String agentUser = requireAuth(auth);
+    ensureAgentExists(agentUser);
+    var session = requireConnectedSession(agentUser);
+    String agentPass = credentialService.resolveAgentPass(agentUser)
+        .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
+            "VICIDIAL_AGENT_CREDENTIALS_MISSING",
+            "No existe agent_pass configurado para el agente.",
+            "Actualice users.agent_pass_encrypted antes de colgar llamada.",
+            null));
+    String campaignId = firstNonBlank(req == null ? null : req.campaignId(), session.connectedCampaign);
+    String dispo = req == null ? null : req.dispo();
+    var result = vicidialService.hangupActiveCall(agentUser, agentPass, session, campaignId, dispo);
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("ok", result.executed());
+    response.put("code", result.executed() ? "VICIDIAL_HANGUP_SENT" : "VICIDIAL_HANGUP_NO_ACTIVE_CALL");
+    response.put("classification", result.classification());
+    response.put("callId", result.callId());
+    response.put("leadId", result.leadId());
+    response.put("uniqueId", result.uniqueId());
+    response.put("channel", result.channel());
+    response.put("agentStatus", result.agentStatus());
+    response.put("details", result.details());
+    return response;
+  }
   public record PauseReq(String action){}
   @PostMapping("/pause") Map<String,Object> pause(@RequestBody PauseReq req, Authentication auth){ vicidial.pause(requireAuth(auth),req.action()); return Map.of("ok",true); }
 
@@ -429,7 +599,13 @@ public class AgentController {
   }
 
   private String extract(String raw, String key){
-    var m=java.util.regex.Pattern.compile(key+"=([^&\\n]+)").matcher(Objects.toString(raw, "")); return m.find()?m.group(1):"";
+    Map<String, String> parsed = vicidial.parseKeyValueLines(raw);
+    String value = firstPresent(parsed, key);
+    if (value != null && !value.isBlank()) {
+      return value;
+    }
+    var m = java.util.regex.Pattern.compile(key + "=([^&\\n]+)").matcher(Objects.toString(raw, ""));
+    return m.find() ? m.group(1) : "";
   }
   private Long extractLong(String raw,String key){ try{return Long.parseLong(extract(raw,key));}catch(Exception e){return null;} }
 
@@ -489,27 +665,47 @@ public class AgentController {
     payload.put("pass", agentPass);
     payload.put("server_ip", session.serverIp);
     payload.put("session_name", session.sessionName);
-    payload.put("agent_user", agentUser);
     payload.put("campaign", campaignId);
-    payload.put("phone_login", session.connectedPhoneLogin);
-    payload.put("conf_exten", firstNonBlank(session.confExten, session.connectedPhoneLogin));
     payload.put("agent_log_id", Objects.toString(session.agentLogId, ""));
     payload.put("format", "text");
     return payload;
   }
 
-  private String firstNonBlank(String value, String fallback) {
-    return value == null || value.isBlank() ? fallback : value;
-  }
-
-  private String firstPresent(Map<String, String> parsed, String... keys) {
-    for (String key : keys) {
-      String value = parsed.get(key);
+  private String firstNonBlank(String... values) {
+    for (String value : values) {
       if (value != null && !value.isBlank()) {
         return value;
       }
     }
     return null;
+  }
+
+  private String firstPresent(Map<String, String> parsed, String... keys) {
+    for (String key : keys) {
+      String normalized = normalizeParsedKey(key);
+      String value = parsed.get(normalized);
+      if ((value == null || value.isBlank()) && normalized.contains("_")) {
+        value = parsed.get(normalized.replace("_", ""));
+      }
+      if (value != null && !value.isBlank()) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private boolean isInCallStatus(String status) {
+    return "INCALL".equalsIgnoreCase(Objects.toString(status, ""));
+  }
+
+  private String normalizeParsedKey(String key) {
+    return Objects.toString(key, "")
+        .trim()
+        .toLowerCase(Locale.ROOT)
+        .replaceAll("[^a-z0-9]+", "_")
+        .replaceAll("_+", "_")
+        .replaceAll("^_+", "")
+        .replaceAll("_+$", "");
   }
 
   private Map<String, Object> contextPayload(String mode, String campaign, String phoneLogin, String agentUser) {
@@ -519,6 +715,20 @@ public class AgentController {
     context.put("phoneLogin", phoneLogin);
     context.put("agentUser", agentUser);
     return context;
+  }
+
+  private Map<String, Object> runtimePayload(VicidialService.RealtimeCallSnapshot realtime) {
+    Map<String, Object> runtime = new LinkedHashMap<>();
+    runtime.put("classification", realtime.classification());
+    runtime.put("agentStatus", realtime.agentStatus());
+    runtime.put("callId", realtime.callId());
+    runtime.put("leadId", realtime.leadId());
+    runtime.put("uniqueId", realtime.uniqueId());
+    runtime.put("channel", realtime.channel());
+    if (realtime.details() != null && !realtime.details().isEmpty()) {
+      runtime.put("details", realtime.details());
+    }
+    return runtime;
   }
 
   private Map<String, Object> businessNoLeadResponse(Map<String, Object> details) {
@@ -551,20 +761,23 @@ public class AgentController {
 
   private VicidialServiceException dialBusinessException(String code, int httpStatus, VicidialDialResponseParser.DialClassification classification, String rawSnippet, Map<String, String> payload, String defaultMessage) {
     HttpStatus status = switch (classification) {
-      case RELOGIN_REQUIRED, INVALID_SESSION -> HttpStatus.CONFLICT;
+      case RELOGIN_REQUIRED -> HttpStatus.UNAUTHORIZED;
+      case INVALID_SESSION -> HttpStatus.CONFLICT;
       case NO_LEADS -> HttpStatus.CONFLICT;
       case INVALID_PARAMS -> HttpStatus.UNPROCESSABLE_ENTITY;
       case UNKNOWN -> HttpStatus.CONFLICT;
       case SUCCESS -> HttpStatus.OK;
     };
     String responseCode = switch (classification) {
-      case RELOGIN_REQUIRED, INVALID_SESSION -> "VICIDIAL_RELOGIN_REQUIRED";
+      case RELOGIN_REQUIRED -> "VICIDIAL_RELOGIN_REQUIRED";
+      case INVALID_SESSION -> "VICIDIAL_INVALID_SESSION";
       case NO_LEADS -> "VICIDIAL_NO_LEADS";
       case INVALID_PARAMS -> "VICIDIAL_INVALID_PARAMS";
       default -> code;
     };
     String hint = switch (classification) {
-      case RELOGIN_REQUIRED, INVALID_SESSION -> "Conecte anexo/campaña nuevamente para continuar.";
+      case RELOGIN_REQUIRED -> "Conecte anexo/campaña nuevamente para continuar.";
+      case INVALID_SESSION -> "Revise sesión AGC/cookies y consistencia de parámetros de marcación.";
       case NO_LEADS -> "No hay leads disponibles en el hopper para este agente.";
       case INVALID_PARAMS -> "Revise los parámetros enviados para marcación manual.";
       default -> "Valide parámetros de sesión (session_name/server_ip/agent_log_id) y estado del agente.";
@@ -583,10 +796,14 @@ public class AgentController {
     if (!debugAllowed()) {
       return;
     }
-    response.put("details", Map.of(
-        "debugRequest", maskedUrlEncodedPayload(payload),
-        "rawSnippet", rawSnippet
-    ));
+    Map<String, Object> details = new LinkedHashMap<>();
+    Object existing = response.get("details");
+    if (existing instanceof Map<?, ?> existingMap) {
+      existingMap.forEach((key, value) -> details.put(Objects.toString(key, ""), value));
+    }
+    details.put("debugRequest", maskedUrlEncodedPayload(payload));
+    details.put("rawSnippet", rawSnippet);
+    response.put("details", details);
   }
 
   private String maskedUrlEncodedPayload(Map<String, String> payload) {

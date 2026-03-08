@@ -219,6 +219,77 @@ public class VicidialClient {
     return executeVdcQueryWithCookies(agentUser, payload);
   }
 
+  public VicidialHttpResult confExtenCheck(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.putIfAbsent("format", "text");
+    return executeAgcPostWithCookies(agentUser, "/agc/conf_exten_check.php", payload);
+  }
+
+  public VicidialHttpResult vdcScriptDisplay(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.putIfAbsent("format", "text");
+    return executeAgcPostWithCookies(agentUser, "/agc/vdc_script_display.php", payload);
+  }
+
+  public VicidialHttpResult manualDialLookCall(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "manDiaLlookCaLL");
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
+  public VicidialHttpResult monitorConf(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "MonitorConf");
+    payload.putIfAbsent("format", "text");
+    return executeAgcPostWithCookies(agentUser, "/agc/manager_send.php", payload);
+  }
+
+  public VicidialHttpResult hangupConfDial(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "HangupConfDial");
+    payload.putIfAbsent("format", "text");
+    return executeAgcPostWithCookies(agentUser, "/agc/manager_send.php", payload);
+  }
+
+  public VicidialHttpResult hangup(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "Hangup");
+    payload.putIfAbsent("format", "text");
+    return executeAgcPostWithCookies(agentUser, "/agc/manager_send.php", payload);
+  }
+
+  public VicidialHttpResult manualDialLogCall(String agentUser, Map<String, String> params, String stage) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "manDiaLlogCaLL");
+    if (StringUtils.hasText(stage)) {
+      payload.put("stage", stage);
+    }
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
+  public VicidialHttpResult updateLead(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "updateLEAD");
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
+  public VicidialHttpResult updateDispo(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "updateDISPO");
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
+  public VicidialHttpResult runUrls(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "RUNurls");
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
   public ManualDialOutcome evaluateManualDialBody(String body) {
     String normalized = normalize(body);
     if (containsLoginForm(body)
@@ -246,18 +317,87 @@ public class VicidialClient {
     Map<String, String> parsed = new LinkedHashMap<>();
     String safeBody = Objects.toString(rawBody, "");
     String[] lines = safeBody.split("\\r?\\n");
-    Pattern pattern = Pattern.compile("^\\s*([A-Za-z0-9_]+)\\s*[:=]\\s*(.*?)\\s*$");
+    Pattern pattern = Pattern.compile("^\\s*([A-Za-z0-9_\\-\\s]+?)\\s*[:=]\\s*(.*?)\\s*$");
     for (String line : lines) {
-      Matcher matcher = pattern.matcher(line);
-      if (matcher.find()) {
-        parsed.put(matcher.group(1).toLowerCase(), matcher.group(2));
+      String trimmed = Objects.toString(line, "").trim();
+      if (trimmed.isEmpty()) {
+        continue;
       }
+      if (trimmed.contains("&") && trimmed.contains("=")) {
+        for (String pair : trimmed.split("&")) {
+          parsePair(parsed, pattern, pair);
+        }
+      }
+      if (trimmed.contains("|")) {
+        for (String part : trimmed.split("\\|")) {
+          parsePair(parsed, pattern, part);
+        }
+      }
+      parsePair(parsed, pattern, trimmed);
     }
-    Matcher callIdMatcher = Pattern.compile("\\b(M[0-9]{6,})\\b").matcher(safeBody);
+    Matcher callIdMatcher = Pattern.compile("\\b(M[0-9A-Z]{6,})\\b").matcher(safeBody);
     if (callIdMatcher.find()) {
-      parsed.putIfAbsent("call_id", callIdMatcher.group(1));
+      putParsedValue(parsed, "call_id", callIdMatcher.group(1));
     }
     return parsed;
+  }
+
+  private void parsePair(Map<String, String> parsed, Pattern pattern, String candidate) {
+    Matcher matcher = pattern.matcher(Objects.toString(candidate, ""));
+    if (!matcher.find()) {
+      return;
+    }
+    String key = matcher.group(1);
+    String value = matcher.group(2);
+    putParsedValue(parsed, key, value);
+  }
+
+  private void putParsedValue(Map<String, String> parsed, String rawKey, String rawValue) {
+    String key = normalizeParsedKey(rawKey);
+    String value = sanitizeParsedValue(rawValue);
+    if (!StringUtils.hasText(key) || !StringUtils.hasText(value)) {
+      return;
+    }
+    parsed.putIfAbsent(key, value);
+    String compact = key.replace("_", "");
+    if (!compact.equals(key)) {
+      parsed.putIfAbsent(compact, value);
+    }
+  }
+
+  private String normalizeParsedKey(String rawKey) {
+    String key = Objects.toString(rawKey, "").trim().toLowerCase();
+    if (!StringUtils.hasText(key)) {
+      return "";
+    }
+    key = key
+        .replaceAll("[^a-z0-9]+", "_")
+        .replaceAll("_+", "_")
+        .replaceAll("^_+", "")
+        .replaceAll("_+$", "");
+    if (key.startsWith("var_")) {
+      key = key.substring(4);
+    }
+    if (key.startsWith("window_")) {
+      key = key.substring(7);
+    }
+    if (key.startsWith("this_")) {
+      key = key.substring(5);
+    }
+    return key;
+  }
+
+  private String sanitizeParsedValue(String rawValue) {
+    String value = Objects.toString(rawValue, "").trim();
+    if (!StringUtils.hasText(value)) {
+      return value;
+    }
+    value = value
+        .replaceAll("^[\"']+", "")
+        .replaceAll("[\"']+$", "")
+        .replaceAll("[;,]+$", "")
+        .trim();
+    return value;
   }
 
   public String activeLead(String agent) {
@@ -687,6 +827,17 @@ public class VicidialClient {
       payload.put("source", settings.source());
     }
     return executePostWithCookies(settings.baseUrl(), "/agc/vdc_db_query.php", payload, agentUser);
+  }
+
+  private VicidialHttpResult executeAgcPostWithCookies(String agentUser, String path, Map<String, String> params) {
+    configService.assertVicidialApiConfigured();
+    var settings = configService.resolve();
+    var payload = new LinkedHashMap<String, String>();
+    payload.putAll(params);
+    if (StringUtils.hasText(settings.source()) && !payload.containsKey("source")) {
+      payload.put("source", settings.source());
+    }
+    return executePostWithCookies(settings.baseUrl(), path, payload, agentUser);
   }
 
   private List<NameValuePair> toNameValuePairs(Map<String, String> params) {

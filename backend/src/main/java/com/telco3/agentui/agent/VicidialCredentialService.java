@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.Optional;
 
 @Service
@@ -129,9 +130,9 @@ public class VicidialCredentialService {
     var entity = getOrCreate(appUsername);
     entity.sessionName = emptyToNull(sessionName);
     entity.serverIp = emptyToNull(serverIp);
-    entity.confExten = emptyToNull(confExten);
-    entity.extension = emptyToNull(extension);
-    entity.protocol = emptyToNull(protocol);
+    entity.confExten = sanitizeConfExten(confExten);
+    entity.extension = sanitizeExtension(extension);
+    entity.protocol = sanitizeProtocol(protocol);
     entity.agentLogId = agentLogId;
     entity.updatedAt = OffsetDateTime.now();
     repo.save(entity);
@@ -177,6 +178,50 @@ public class VicidialCredentialService {
 
   private String emptyToNull(String value) {
     return value == null || value.isBlank() ? null : value;
+  }
+
+  private String sanitizeConfExten(String value) {
+    String candidate = emptyToNull(value);
+    if (candidate == null) {
+      return null;
+    }
+    if (containsPlaceholderToken(candidate)) {
+      return null;
+    }
+    String digits = candidate.replaceAll("[^0-9]+", "");
+    return digits.isBlank() ? null : digits;
+  }
+
+  private String sanitizeExtension(String value) {
+    String candidate = emptyToNull(value);
+    if (candidate == null) {
+      return null;
+    }
+    if (containsPlaceholderToken(candidate)) {
+      return null;
+    }
+    return candidate;
+  }
+
+  private String sanitizeProtocol(String value) {
+    String candidate = emptyToNull(value);
+    if (candidate == null) {
+      return null;
+    }
+    if (containsPlaceholderToken(candidate)) {
+      return null;
+    }
+    return candidate.toUpperCase(Locale.ROOT);
+  }
+
+  private boolean containsPlaceholderToken(String value) {
+    String normalized = value.toLowerCase(Locale.ROOT);
+    return normalized.contains("taskconfnum")
+        || normalized.contains("session_id")
+        || normalized.contains("undefined")
+        || normalized.contains("null")
+        || normalized.contains("+")
+        || normalized.contains("&");
   }
 
   private AgentVicidialCredentialEntity getOrCreate(String appUsername) {

@@ -51,4 +51,63 @@ class VicidialDialResponseParserTest {
     assertEquals(VicidialDialResponseParser.DialClassification.NO_LEADS, result.classification());
   }
 
+  @Test
+  void parseDetailedExtractsHarStyleManualDialFields() {
+    String raw = """
+        ACTION: manDiaLnextCaLL
+        callId = M3071629250000001166
+        lead_id = 1166
+        phone_number = 970222277
+        list_id = 106
+        status = INCALL
+        """;
+    var result = parser.parseDetailed(raw);
+    assertTrue(result.success());
+    assertEquals(VicidialDialResponseParser.DialClassification.SUCCESS, result.classification());
+    assertEquals("M3071629250000001166", result.callId());
+    assertEquals(1166L, result.leadId());
+    assertEquals("970222277", result.phoneNumber());
+    assertEquals("106", result.listId());
+    assertEquals("INCALL", result.leadStatus());
+  }
+
+  @Test
+  void parseDetailedExtractsQuotedJavascriptStyleFields() {
+    String raw = """
+        var call_id = 'M3071755390000000549';
+        var lead_id = '549';
+        var phone_number = '970222277';
+        var list_id = '106';
+        var status = 'INCALL';
+        """;
+    var result = parser.parseDetailed(raw);
+    assertTrue(result.success());
+    assertEquals(VicidialDialResponseParser.DialClassification.SUCCESS, result.classification());
+    assertEquals("M3071755390000000549", result.callId());
+    assertEquals(549L, result.leadId());
+    assertEquals("970222277", result.phoneNumber());
+    assertEquals("106", result.listId());
+    assertEquals("INCALL", result.leadStatus());
+  }
+
+  @Test
+  void parsePermissionDeniedIsInvalidSessionNotRelogin() {
+    String raw = "ERROR: auth USER DOES NOT HAVE PERMISSION TO PERFORM FUNCTION";
+    var result = parser.parseDetailed(raw);
+    assertFalse(result.success());
+    assertEquals(VicidialDialResponseParser.DialClassification.INVALID_SESSION, result.classification());
+  }
+
+  @Test
+  void parseDetailedExtractsOfficialPositionalDialFields() {
+    String raw = "M3071629250000001166 1166 NEW   106 -7.00 1 970222277";
+    var result = parser.parseDetailed(raw);
+    assertTrue(result.success());
+    assertEquals("M3071629250000001166", result.callId());
+    assertEquals(1166L, result.leadId());
+    assertEquals("970222277", result.phoneNumber());
+    assertEquals("106", result.listId());
+    assertEquals("NEW", result.leadStatus());
+  }
+
 }

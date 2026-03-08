@@ -18,6 +18,7 @@ export const getActiveLead = ()=>api.get('/api/agent/active-lead').then(r=>r.dat
 export const getContext = (p:{leadId?:number})=>api.get('/api/agent/context',{params:p}).then(r=>r.data);
 export const dialNext = (payload:{campaignId:string})=>api.post('/api/agent/vicidial/dial/next',payload).then(r=>r.data);
 export const manualDial = (payload:{campaignId:string;phoneNumber:string;phoneCode?:string;dialTimeout?:number;dialPrefix?:string;preview?:'NO'|'YES'})=>api.post('/api/agent/vicidial/dial/manual',payload).then(r=>r.data);
+export const hangupCall = (payload?:{campaignId?:string;dispo?:string})=>api.post('/api/agent/vicidial/call/hangup',payload ?? {}).then(r=>r.data);
 export const saveInteraction = (payload:any)=>api.post('/api/agent/interactions',payload).then(r=>r.data);
 export const retryInteraction = (id:number)=>api.post(`/api/agent/interactions/${id}/retry-vicidial`).then(r=>r.data);
 export const previewAction = (payload:any)=>api.post('/api/agent/preview-action',payload).then(r=>r.data);
