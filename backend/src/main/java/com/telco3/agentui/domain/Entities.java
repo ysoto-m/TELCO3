@@ -27,6 +27,11 @@ public class Entities {
     public OffsetDateTime updatedAt = OffsetDateTime.now();
   }
 
+  /**
+   * Legacy entity (english naming). Keep for compatibility.
+   * Prefer {@link com.telco3.agentui.domain.ContactoEntity} in new features.
+   */
+  @Deprecated(forRemoval = false, since = "1.3.0")
   @Entity @Table(name="customers")
   public static class CustomerEntity {
     @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;
@@ -36,6 +41,10 @@ public class Entities {
     public OffsetDateTime createdAt = OffsetDateTime.now();
   }
 
+  /**
+   * Legacy entity (english naming). Keep for compatibility.
+   */
+  @Deprecated(forRemoval = false, since = "1.3.0")
   @Entity @Table(name="customer_phones")
   public static class CustomerPhoneEntity {
     @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;

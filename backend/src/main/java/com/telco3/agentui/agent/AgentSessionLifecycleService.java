@@ -5,36 +5,25 @@ import com.telco3.agentui.domain.Entities;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialRuntimeDataSourceFactory;
 import com.telco3.agentui.vicidial.VicidialService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 @Service
 public class AgentSessionLifecycleService {
-  private static final Logger log = LoggerFactory.getLogger(AgentSessionLifecycleService.class);
-
   private final AgentVicidialCredentialRepository repo;
   private final VicidialCredentialService credentialService;
   private final AgentVicidialSessionService vicidialSessionService;
   private final VicidialClient vicidialClient;
   private final VicidialService vicidialService;
   private final VicidialRuntimeDataSourceFactory runtimeDataSourceFactory;
-  private final long orphanThresholdMs;
 
   public AgentSessionLifecycleService(
       AgentVicidialCredentialRepository repo,
@@ -42,8 +31,7 @@ public class AgentSessionLifecycleService {
       AgentVicidialSessionService vicidialSessionService,
       VicidialClient vicidialClient,
       VicidialService vicidialService,
-      VicidialRuntimeDataSourceFactory runtimeDataSourceFactory,
-      @Value("${app.agent-session.orphan-threshold-ms:60000}") long orphanThresholdMs
+      VicidialRuntimeDataSourceFactory runtimeDataSourceFactory
   ) {
     this.repo = repo;
     this.credentialService = credentialService;
@@ -51,54 +39,6 @@ public class AgentSessionLifecycleService {
     this.vicidialClient = vicidialClient;
     this.vicidialService = vicidialService;
     this.runtimeDataSourceFactory = runtimeDataSourceFactory;
-    this.orphanThresholdMs = orphanThresholdMs;
-  }
-
-  public HeartbeatResult heartbeat(String appUsername, String sessionId, String lastKnownVicidialStatus) {
-    OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-    var entity = repo.findByAppUsername(appUsername).orElseGet(() -> {
-      var created = new Entities.AgentVicidialCredentialEntity();
-      created.appUsername = appUsername;
-      created.agentUser = appUsername;
-      return created;
-    });
-    entity.crmSessionId = resolveSessionId(sessionId, entity.crmSessionId);
-    entity.lastHeartbeatAt = now;
-    entity.sessionStatus = entity.connected
-        ? "ACTIVE"
-        : (entity.logoutTime != null ? "LOGGED_OUT" : "AUTHENTICATED");
-    if (StringUtils.hasText(lastKnownVicidialStatus)) {
-      entity.lastKnownVicidialStatus = lastKnownVicidialStatus.trim().toUpperCase();
-    }
-    entity.updatedAt = now;
-    repo.save(entity);
-    return new HeartbeatResult(true, entity.crmSessionId, entity.sessionStatus, entity.connected, now);
-  }
-
-  public BrowserExitResult browserExit(String authenticatedUser, String hintedAgentUser, String sessionId, String reason) {
-    var entity = locateSessionEntity(authenticatedUser, hintedAgentUser, sessionId);
-    if (entity.isEmpty()) {
-      return new BrowserExitResult(true, false, "SESSION_NOT_FOUND", OffsetDateTime.now(ZoneOffset.UTC));
-    }
-    OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-    Entities.AgentVicidialCredentialEntity row = entity.get();
-    row.lastBrowserExitAt = now;
-    row.sessionStatus = "BROWSER_EXITED";
-    row.cleanupStatus = firstNonBlank(reason, "BROWSER_EXIT_SIGNAL");
-    row.updatedAt = now;
-    repo.save(row);
-
-    if (!row.connected) {
-      return new BrowserExitResult(true, true, "BROWSER_EXIT_RECORDED", now);
-    }
-
-    try {
-      LogoutResult logoutResult = logout(row.appUsername, firstNonBlank(reason, "BROWSER_EXIT"));
-      return new BrowserExitResult(logoutResult.ok(), true, logoutResult.code(), now);
-    } catch (Exception ex) {
-      updateSessionState(row.appUsername, "INCONSISTENT_CLEANUP_FAILED", "BROWSER_EXIT_CLEANUP_FAILED", true);
-      return new BrowserExitResult(false, true, "BROWSER_EXIT_CLEANUP_FAILED", now);
-    }
   }
 
   public LogoutResult logout(String appUsername, String reason) {
@@ -169,159 +109,8 @@ public class AgentSessionLifecycleService {
     return new LogoutResult(true, true, stillInLiveAgents ? "LOGOUT_PARTIAL" : "LOGOUT_OK", details);
   }
 
-  @Scheduled(fixedDelayString = "${app.agent-session.reconcile-interval-ms:60000}")
-  public void reconcileOrphanSessions() {
-    OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-    List<Entities.AgentVicidialCredentialEntity> connected = repo.findByConnectedTrue();
-    for (Entities.AgentVicidialCredentialEntity session : connected) {
-      try {
-        reconcileOne(session, now);
-      } catch (Exception ex) {
-        log.warn("Agent session reconcile failed agent={} cause={}", session.appUsername, ex.getClass().getSimpleName());
-      }
-    }
-  }
-
-  private void reconcileOne(Entities.AgentVicidialCredentialEntity session, OffsetDateTime now) {
-    if (!isStale(session.lastHeartbeatAt, session.connectedAt, now)) {
-      return;
-    }
-
-    RuntimePresence presence = inspectRuntimePresence(session);
-    if (!presence.runtimeReachable()) {
-      updateSessionState(session.appUsername, "STALE_RUNTIME_UNKNOWN", "RUNTIME_UNAVAILABLE", false);
-      return;
-    }
-
-    if (!presence.inLiveAgents()) {
-      vicidialSessionService.disconnectPhone(session.appUsername);
-      updateAfterCleanup(session.appUsername, "DISCONNECTED", "AUTO_FIXED_LOCAL_STATE", "NOT_IN_LIVE_AGENTS");
-      return;
-    }
-
-    if (presence.hasActiveCall()) {
-      updateSessionState(session.appUsername, "INCONSISTENT_ACTIVE_CALL", "SKIPPED_ACTIVE_CALL", true);
-      return;
-    }
-
-    boolean logoutOk = attemptOperationalLogout(session);
-    if (logoutOk) {
-      vicidialSessionService.disconnectPhone(session.appUsername);
-      updateAfterCleanup(session.appUsername, "DISCONNECTED", "AUTO_CLEANUP_OK", "ORPHAN_TIMEOUT_NO_ACTIVE_CALL");
-    } else {
-      updateSessionState(session.appUsername, "INCONSISTENT_CLEANUP_FAILED", "AUTO_CLEANUP_FAILED", true);
-    }
-  }
-
-  private boolean attemptOperationalLogout(Entities.AgentVicidialCredentialEntity session) {
-    String vicidialAgentUser = firstNonBlank(session.agentUser, session.appUsername);
-    try {
-      String agentPass = resolveAgentPass(session.appUsername).orElse(null);
-      if (StringUtils.hasText(agentPass)) {
-        try {
-          vicidialService.hangupActiveCall(vicidialAgentUser, agentPass, session, session.connectedCampaign, "N");
-        } catch (Exception ex) {
-          log.debug("Orphan cleanup hangup ignored agent={} cause={}", session.appUsername, ex.getClass().getSimpleName());
-        }
-        try {
-          var logoutFlow = vicidialService.logoutAgentSession(vicidialAgentUser, agentPass, session);
-          if (logoutFlow.loggedOutConfirmed()) {
-            return true;
-          }
-        } catch (Exception ex) {
-          log.debug("Operational AGC logout flow failed agent={} cause={}", session.appUsername, ex.getClass().getSimpleName());
-        }
-        try {
-          vicidialClient.agentLogout(vicidialAgentUser);
-        } catch (Exception ex) {
-          log.debug("Operational API logout fallback failed agent={} cause={}", session.appUsername, ex.getClass().getSimpleName());
-        }
-      } else {
-        try {
-          vicidialClient.agentLogout(vicidialAgentUser);
-        } catch (Exception ex) {
-          log.debug("Operational API logout without agent_pass failed agent={} cause={}", session.appUsername, ex.getClass().getSimpleName());
-        }
-      }
-      sleepQuietly(350L);
-      boolean stillLive = isAgentInLiveAgents(vicidialAgentUser);
-      if (!stillLive) {
-        vicidialClient.clearAgentCookies(vicidialAgentUser);
-      }
-      return !stillLive;
-    } catch (Exception ex) {
-      log.warn("Operational logout failed agent={} cause={}", session.appUsername, ex.getClass().getSimpleName());
-      return false;
-    }
-  }
-
-  private RuntimePresence inspectRuntimePresence(Entities.AgentVicidialCredentialEntity session) {
-    JdbcTemplate jdbc;
-    try {
-      jdbc = new JdbcTemplate(runtimeDataSourceFactory.getOrCreate());
-    } catch (Exception ex) {
-      return RuntimePresence.runtimeUnavailable();
-    }
-
-    String liveSql = """
-        SELECT status, lead_id, uniqueid, channel, extension
-          FROM vicidial_live_agents
-         WHERE user = ?
-         ORDER BY last_update_time DESC
-         LIMIT 1
-        """;
-    try {
-      String vicidialAgentUser = firstNonBlank(session.agentUser, session.appUsername);
-      return jdbc.query(liveSql, rs -> {
-        if (!rs.next()) {
-          return RuntimePresence.notInLiveAgents();
-        }
-        String status = rs.getString("status");
-        Long leadId = rs.getLong("lead_id");
-        if (rs.wasNull() || leadId != null && leadId <= 0) {
-          leadId = null;
-        }
-        String uniqueId = rs.getString("uniqueid");
-        String channel = rs.getString("channel");
-        String extension = firstNonBlank(rs.getString("extension"), session.connectedPhoneLogin);
-        boolean hasActiveCall = hasAutoCall(jdbc, session.connectedCampaign, leadId, uniqueId, channel, extension);
-        return RuntimePresence.inLiveAgents(status, hasActiveCall);
-      }, vicidialAgentUser);
-    } catch (DataAccessException ex) {
-      return RuntimePresence.runtimeUnavailable();
-    }
-  }
-
-  private boolean hasAutoCall(
-      JdbcTemplate jdbc,
-      String campaignId,
-      Long leadId,
-      String uniqueId,
-      String channel,
-      String extension
-  ) {
-    String sql = """
-        SELECT COUNT(*)
-          FROM vicidial_auto_calls
-         WHERE (? IS NULL OR campaign_id = ?)
-           AND (
-             (? IS NOT NULL AND lead_id = ?)
-             OR (? IS NOT NULL AND uniqueid = ?)
-             OR (? IS NOT NULL AND channel = ?)
-             OR (? IS NOT NULL AND extension = ?)
-           )
-        """;
-    try {
-      Long count = jdbc.queryForObject(sql, Long.class,
-          campaignId, campaignId,
-          leadId, leadId,
-          uniqueId, uniqueId,
-          channel, channel,
-          extension, extension);
-      return count != null && count > 0;
-    } catch (DataAccessException ex) {
-      return false;
-    }
+  private Optional<String> resolveAgentPass(String appUsername) {
+    return credentialService.resolveAgentPass(appUsername);
   }
 
   private boolean isAgentInLiveAgents(String agentUser) {
@@ -347,68 +136,6 @@ public class AgentSessionLifecycleService {
       entity.updatedAt = now;
       repo.save(entity);
     });
-  }
-
-  private void updateSessionState(String appUsername, String sessionStatus, String cleanupStatus, boolean incrementAttempts) {
-    OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-    repo.findByAppUsername(appUsername).ifPresent(entity -> {
-      entity.sessionStatus = sessionStatus;
-      entity.cleanupStatus = cleanupStatus;
-      if (incrementAttempts) {
-        entity.cleanupAttempts = Objects.requireNonNullElse(entity.cleanupAttempts, 0) + 1;
-      }
-      entity.updatedAt = now;
-      repo.save(entity);
-    });
-  }
-
-  private Optional<String> resolveAgentPass(String appUsername) {
-    return credentialService.resolveAgentPass(appUsername);
-  }
-
-  private Optional<Entities.AgentVicidialCredentialEntity> locateSessionEntity(
-      String authenticatedUser,
-      String hintedAgentUser,
-      String sessionId
-  ) {
-    if (StringUtils.hasText(authenticatedUser)) {
-      Optional<Entities.AgentVicidialCredentialEntity> fromAuth = repo.findByAppUsername(authenticatedUser);
-      if (fromAuth.isPresent()) {
-        if (StringUtils.hasText(hintedAgentUser)
-            && !authenticatedUser.trim().equalsIgnoreCase(hintedAgentUser.trim())) {
-          return Optional.empty();
-        }
-        return fromAuth;
-      }
-    }
-    if (StringUtils.hasText(sessionId)) {
-      Optional<Entities.AgentVicidialCredentialEntity> bySession = repo.findByCrmSessionId(sessionId.trim());
-      if (bySession.isPresent()) {
-        return bySession;
-      }
-    }
-    return Optional.empty();
-  }
-
-  private boolean isStale(OffsetDateTime lastHeartbeatAt, OffsetDateTime connectedAt, OffsetDateTime now) {
-    if (lastHeartbeatAt == null) {
-      if (connectedAt == null) {
-        return true;
-      }
-      return Duration.between(connectedAt, now).toMillis() >= orphanThresholdMs;
-    }
-    long silentMillis = Duration.between(lastHeartbeatAt, now).toMillis();
-    return silentMillis >= orphanThresholdMs;
-  }
-
-  private String resolveSessionId(String incomingSessionId, String existingSessionId) {
-    if (StringUtils.hasText(incomingSessionId)) {
-      return incomingSessionId.trim();
-    }
-    if (StringUtils.hasText(existingSessionId)) {
-      return existingSessionId.trim();
-    }
-    return UUID.randomUUID().toString();
   }
 
   private String snippet(String raw, int max) {
@@ -452,26 +179,6 @@ public class AgentSessionLifecycleService {
     details.put("agentLogoutSent", logoutSent);
   }
 
-  public record HeartbeatResult(boolean ok, String sessionId, String status, boolean connected, OffsetDateTime serverTime) {
-  }
-
-  public record BrowserExitResult(boolean ok, boolean updated, String code, OffsetDateTime serverTime) {
-  }
-
   public record LogoutResult(boolean ok, boolean hadSession, String code, Map<String, Object> details) {
-  }
-
-  private record RuntimePresence(boolean runtimeReachable, boolean inLiveAgents, boolean hasActiveCall, String agentStatus) {
-    static RuntimePresence runtimeUnavailable() {
-      return new RuntimePresence(false, false, false, null);
-    }
-
-    static RuntimePresence notInLiveAgents() {
-      return new RuntimePresence(true, false, false, null);
-    }
-
-    static RuntimePresence inLiveAgents(String status, boolean hasActiveCall) {
-      return new RuntimePresence(true, true, hasActiveCall, status);
-    }
   }
 }

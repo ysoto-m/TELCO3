@@ -1,88 +1,55 @@
 package com.telco3.agentui.admin;
 
-import com.telco3.agentui.vicidial.VicidialConfigService;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import org.springframework.http.HttpStatus;
-import org.springframework.util.StringUtils;
+import com.telco3.agentui.settings.SettingsController;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
-import java.net.URI;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
+@Deprecated(forRemoval = false, since = "1.2.0")
 @RestController
 @RequestMapping("/api/admin/config/vicidial")
 public class AdminVicidialConfigController {
-  private final VicidialConfigService configService;
+  private final SettingsController settingsController;
 
-  public AdminVicidialConfigController(VicidialConfigService configService) {
-    this.configService = configService;
+  public AdminVicidialConfigController(SettingsController settingsController) {
+    this.settingsController = settingsController;
   }
 
+  @Deprecated(forRemoval = false, since = "1.2.0")
   @GetMapping
   public Map<String, Object> get() {
-    var config = configService.getStoredConfigMasked();
-    Map<String, Object> response = new LinkedHashMap<>();
-    response.put("baseUrl", config.baseUrl());
-    response.put("apiUser", config.apiUser());
-    response.put("apiPass", config.apiPassMasked());
-    response.put("source", config.source());
-    response.put("dbHost", config.dbHost());
-    response.put("dbPort", config.dbPort());
-    response.put("dbName", config.dbName());
-    response.put("dbUser", config.dbUser());
-    response.put("dbPass", config.dbPassMasked());
-    response.put("updatedAt", config.updatedAt());
-    return response;
+    return settingsController.get();
   }
 
+  @Deprecated(forRemoval = false, since = "1.2.0")
   @PutMapping
-  @ResponseStatus(HttpStatus.OK)
-  public Map<String, Object> put(@Valid @RequestBody VicidialConfigRequest req) {
-    validate(req);
-    configService.saveConfig(new VicidialConfigService.VicidialConfigUpdateRequest(
-        req.baseUrl(),
-        req.apiUser(),
-        req.apiPass(),
-        req.source(),
-        req.dbHost(),
-        req.dbPort(),
-        req.dbName(),
-        req.dbUser(),
-        req.dbPass()
+  public Map<String, Object> put(@RequestBody VicidialConfigRequest req) {
+    return settingsController.put(new SettingsController.SettingsReq(
+        req.baseUrl,
+        req.apiUser,
+        req.apiPass,
+        req.source,
+        req.dbHost,
+        req.dbPort,
+        req.dbName,
+        req.dbUser,
+        req.dbPass
     ));
-    return Map.of("ok", true);
   }
 
-  private void validate(VicidialConfigRequest req) {
-    if (!isValidHttpUrl(req.baseUrl())) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "BASE_URL debe ser una URL http/https válida");
-    }
-    if (!StringUtils.hasText(req.apiUser())) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "USER es requerido");
-    }
-    if (!StringUtils.hasText(req.apiPass())) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "PASS es requerido");
-    }
-  }
-
-  private boolean isValidHttpUrl(String raw) {
-    try {
-      URI uri = URI.create(raw);
-      return "http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme());
-    } catch (Exception ex) {
-      return false;
-    }
-  }
-
-  public record VicidialConfigRequest(@NotBlank String baseUrl, @NotBlank String apiUser, @NotBlank String apiPass,
-                                      String source, String dbHost, String dbPort, String dbName, String dbUser, String dbPass) {
+  public static class VicidialConfigRequest {
+    public String baseUrl;
+    public String apiUser;
+    public String apiPass;
+    public String source;
+    public String dbHost;
+    public String dbPort;
+    public String dbName;
+    public String dbUser;
+    public String dbPass;
   }
 }

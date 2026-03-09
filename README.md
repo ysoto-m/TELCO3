@@ -20,6 +20,13 @@ No se altera la logica funcional ya estable de:
 - `GET /api/agent/context`
 - Flujo AGC/Vicidial operativo.
 
+Fase B (consolidacion interna) agrega:
+
+- Separacion interna de responsabilidades en Manual2 sin cambiar endpoints.
+- Delegacion de guardas de sesion en `AgentSessionGuardService`.
+- Base hibrida para futuras campanas via `CampaignInteractionCoreService`.
+- Marcado explicito de dominio legacy (english naming) para evitar mezcla en nuevos desarrollos.
+
 ## 2. Arquitectura general
 
 ```mermaid
@@ -35,10 +42,18 @@ flowchart LR
 
 ```mermaid
 flowchart TD
+  AC["AgentController"] --> AGUARD["AgentSessionGuardService"]
   AC["AgentController"] --> AVS["AgentVicidialSessionService"]
   AC --> VS["VicidialService"]
   AC --> VCL["VicidialClient"]
   AC --> SLC["AgentSessionLifecycleService"]
+
+  M2AC["Manual2AgentController"] --> M2S["Manual2Service (Facade)"]
+  M2ADC["Manual2AdminController"] --> M2S
+  M2S --> CORE["CampaignInteractionCoreService"]
+  M2S --> M2CONTACT["Manual2ContactoService"]
+  M2S --> M2SUB["Manual2SubtipificacionService"]
+  M2S --> M2REPORT["Manual2ReportService"]
 
   ARC["AdminController"] --> VCL
   ARC2["VicidialRealtimeAdminController"] --> ARS["VicidialRealtimeAdminService"]
@@ -63,6 +78,8 @@ Backend:
 - `report`: resumen/export CSV.
 - `importer`: import CSV legacy.
 - `domain`: entidades JPA/repositorios.
+- `campaign/core`: servicios comunes de interaccion/gestion reutilizables por campana.
+- `manual2`: adaptador de campana actual (controllers) + servicios internos especializados.
 
 Frontend:
 
@@ -86,8 +103,6 @@ Frontend:
 | `frontend/src/pages/AgentPage.tsx` | `connectVicidialCampaign` | `POST /api/agent/vicidial/campaign/connect` |
 | `frontend/src/pages/AgentPage.tsx` | `getVicidialStatus` | `GET /api/agent/vicidial/status` |
 | `frontend/src/pages/AgentPage.tsx` | `getCampaignDetails` | `GET /api/campaigns/{campaignId}` |
-| `frontend/src/pages/AgentPage.tsx` | `agentSessionHeartbeat` | `POST /api/agent/session/heartbeat` |
-| `frontend/src/pages/AgentPage.tsx` | `sendBeacon/fetch` directo | `POST /api/agent/session/browser-exit` |
 | `frontend/src/pages/AgentPage.tsx` | `agentLogout` | `POST /api/agent/logout` |
 | `frontend/src/pages/AgentPage.tsx` | `getActiveLead` | `GET /api/agent/active-lead` |
 | `frontend/src/pages/AgentPage.tsx` | `getContext` | `GET /api/agent/context` |
@@ -119,11 +134,14 @@ Frontend:
   - `GET/PUT /api/settings/vicidial`
   - `GET/PUT /api/admin/settings`
   - `GET/PUT /api/admin/config/vicidial`
-  - Estado: se mantienen por compatibilidad; principal recomendado para admin nuevo: `/api/admin/config/vicidial`.
+  - Estado:
+    - Oficial: `GET/PUT /api/admin/settings`
+    - Compatibilidad: `GET/PUT /api/settings/vicidial`
+    - Deprecated (alias): `GET/PUT /api/admin/config/vicidial`
 
 - Dial next alias:
   - Principal: `POST /api/agent/vicidial/dial/next`
-  - Compatibilidad: `POST /api/agent/vicidial/manual/next`
+  - Compatibilidad deprecated: `POST /api/agent/vicidial/manual/next`
   - Estado: se mantiene alias para no romper clientes antiguos.
 
 ## 6. Configuracion consolidada
@@ -159,6 +177,19 @@ Resolucion aplicada:
 1. `VITE_BACKEND_BASE_URL`
 2. `VITE_API_BASE_URL`
 3. fallback `http://localhost:8080`
+
+### 7.1 Limpieza de bajo riesgo aplicada
+
+Se eliminaron duplicados legacy `*.js` dentro de `frontend/src` y se mantiene solo fuente `*.ts/*.tsx` como contrato oficial de frontend.
+
+- Entry point oficial: `frontend/src/main.tsx`
+- Se retiraron copias legacy de:
+  - `api/client.js`, `api/sdk.js`
+  - `app/App.js`
+  - `components/ui/AuthStepper.js`, `components/ui/ViciCard.js`
+  - `pages/AdminPage.js`, `pages/AdminRealtimePage.js`, `pages/AgentPage.js`, `pages/LoginPage.js`
+  - `main.js`
+  - `types/openapi.js`
 
 ## 8. Arquitectura de base de datos (CRM propio)
 
@@ -241,6 +272,8 @@ Notas:
 
 - `VICIDIAL_SETTINGS` queda como legacy historico; configuracion activa se almacena en `APP_CONFIG`.
 - `AGENT_VICIDIAL_CREDENTIALS` funciona como estado operativo/sesion agente CRM<->Vicidial.
+- Dominio legacy (mantenido por compatibilidad): `interactions`, `customers`, `customer_phones`.
+- Dominio objetivo para nuevas campanas: `interacciones`, `contactos`, `formulario_manual2`, `gestiones_llamadas`, `subtipificaciones`.
 
 ## 9. Tablas Vicidial usadas (referencial logico)
 
@@ -361,26 +394,24 @@ Agent:
 - `GET /api/agent/vicidial/campaigns`
 - `POST /api/agent/vicidial/campaign/connect`
 - `GET /api/agent/vicidial/status`
-- `POST /api/agent/vicidial/poll`
+- `POST /api/agent/vicidial/poll` (deprecated)
 - `GET /api/agent/active-lead`
 - `GET /api/agent/context`
 - `POST /api/agent/vicidial/dial/next`
-- `POST /api/agent/vicidial/manual/next` (compat alias)
+- `POST /api/agent/vicidial/manual/next` (compat alias, deprecated)
 - `POST /api/agent/vicidial/dial/manual`
 - `POST /api/agent/vicidial/call/hangup`
 - `POST /api/agent/interactions`
 - `POST /api/agent/interactions/{id}/retry-vicidial`
 - `POST /api/agent/preview-action`
 - `POST /api/agent/pause`
-- `POST /api/agent/session/heartbeat`
-- `POST /api/agent/session/browser-exit`
 - `POST /api/agent/logout`
 - `GET /api/agent/manual2/disposiciones`
 - `GET /api/agent/manual2/subtipificaciones`
 - `GET /api/agent/manual2/contacto`
-- `POST /api/agent/manual2/formulario`
+- `POST /api/agent/manual2/formulario` (deprecated)
 - `POST /api/agent/manual2/gestion`
-- `GET /api/agent/manual2/historial`
+- `GET /api/agent/manual2/historial` (deprecated)
 
 Admin legacy:
 
@@ -391,13 +422,13 @@ Admin legacy:
 - `GET /api/admin/interactions/export.csv`
 - `GET /api/admin/users`
 - `POST /api/admin/users`
-- `PUT /api/admin/users/{id}`
+- `PUT /api/admin/users/{id}` (deprecated)
 - `PUT /api/admin/users/{id}/agent-pass`
 - `GET /api/admin/settings`
 - `PUT /api/admin/settings`
 - `GET /api/admin/manual2/reporte`
 - `GET /api/admin/manual2/reporte.csv`
-- `GET /api/admin/manual2/historial`
+- `GET /api/admin/manual2/historial` (deprecated)
 
 Admin realtime Vicidial:
 
@@ -409,16 +440,21 @@ Admin realtime Vicidial:
 
 Settings:
 
-- `GET /api/settings/vicidial`
-- `PUT /api/settings/vicidial`
-- `GET /api/admin/config/vicidial`
-- `PUT /api/admin/config/vicidial`
+- Oficial:
+  - `GET /api/admin/settings`
+  - `PUT /api/admin/settings`
+- Compatibilidad:
+  - `GET /api/settings/vicidial`
+  - `PUT /api/settings/vicidial`
+- Deprecated:
+  - `GET /api/admin/config/vicidial`
+  - `PUT /api/admin/config/vicidial`
 
 Otros:
 
-- `GET /api/reports/summary`
-- `GET /api/reports/export`
-- `POST /api/vicidial/leads/import`
+- `GET /api/reports/summary` (deprecated)
+- `GET /api/reports/export` (deprecated)
+- `POST /api/vicidial/leads/import` (deprecated)
 - `GET /api/campaigns/{campaignId}`
 - `GET /api/dev/vicidial/diag` (solo diagnostico)
 
@@ -488,7 +524,7 @@ Se conserva:
 
 Limpieza futura segura recomendada:
 
-1. Definir fecha de deprecacion de `/api/admin/settings` y `/api/settings/vicidial`.
+1. Definir fecha de retiro de aliases `/api/settings/vicidial` y `/api/admin/config/vicidial` cuando no haya consumidores externos.
 2. Migrar AdminPage legacy a realtime y retirar endpoints legacy cuando no haya consumo.
 3. Retirar modelo `vicidial_settings` solo tras validacion de cero uso real.
 4. Alinear OpenAPI con todos los endpoints activos y marcadores de compatibilidad.
@@ -601,3 +637,21 @@ Salida incluye:
 
 - fecha/hora, agente, campana, telefono, cliente, disposicion, subtipificacion, comentario, observaciones
 - `lead_id`, `call_id`, `unique_id`, `nombre_audio`, `modo_llamada`, `duracion`
+
+## 17. Consolidacion interna Fase B
+
+Cambios estructurales aplicados sin romper contratos publicos:
+
+- `Manual2Service` ahora funciona como facade/orquestador y delega:
+  - `Manual2ContactoService`
+  - `Manual2SubtipificacionService`
+  - `Manual2ReportService`
+  - `CampaignInteractionCoreService` (logica comun reutilizable)
+- `AgentController` delega validaciones de sesion/autenticacion a `AgentSessionGuardService`.
+- Se marcaron repositorios/entidades legacy con `@Deprecated` para evitar que nuevos desarrollos mezclen ambos dominios.
+
+Base hibrida para campanas futuras:
+
+- Core comun: servicios en `campaign/core` para interaccion/contacto/validaciones.
+- Adaptador de campana: `manual2` mantiene endpoints actuales y reglas particulares.
+- Siguiente campana recomendada (ej. `UpgradeMovil`) debe implementar adaptador sobre el mismo core, sin duplicar flujo completo.

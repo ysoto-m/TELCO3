@@ -8,6 +8,11 @@ import org.springframework.data.repository.query.Param;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+/**
+ * Legacy repository (english naming) kept for compatibility.
+ * New campaign features should use repositories around {@link InteraccionEntity}.
+ */
+@Deprecated(forRemoval = false, since = "1.3.0")
 public interface InteractionRepository extends JpaRepository<InteractionEntity,Long> {
  List<InteractionEntity> findTop20ByDniOrderByCreatedAtDesc(String dni);
  List<InteractionEntity> findByCreatedAtBetween(OffsetDateTime from, OffsetDateTime to);

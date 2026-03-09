@@ -18,7 +18,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   agentLogout,
-  agentSessionHeartbeat,
   connectVicidialCampaign,
   dialNext,
   connectVicidialPhone,
@@ -44,31 +43,10 @@ import {
 import AuthStepper from '../components/ui/AuthStepper';
 import ViciCard from '../components/ui/ViciCard';
 
-const heartbeatIntervalMs = 15000;
-const sessionStorageKey = 'agent.crm.session.id';
-
-function ensureBrowserSessionId(): string {
-  const existing = sessionStorage.getItem(sessionStorageKey);
-  if (existing) {
-    return existing;
-  }
-  const generated = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
-  sessionStorage.setItem(sessionStorageKey, generated);
-  return generated;
-}
-
 export default function AgentPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const env = (import.meta as any).env || {};
   const defaultPhoneCode = ((import.meta as any).env?.VITE_DEFAULT_PHONE_CODE || '1').toString();
-  const backendBaseUrl = ((env.VITE_BACKEND_BASE_URL || env.VITE_API_BASE_URL || 'http://localhost:8080') as string).replace(/\/$/, '');
-  const browserSessionIdRef = useRef<string>(ensureBrowserSessionId());
-  const heartbeatInFlightRef = useRef(false);
-  const exitSignalSentRef = useRef(false);
-  const lastKnownStatusRef = useRef('');
   const [dispo, setDispo] = useState('');
   const [notes, setNotes] = useState('');
   const [manual2Form, setManual2Form] = useState({
@@ -238,7 +216,6 @@ export default function AgentPage() {
   });
 
   const logout = async () => {
-    exitSignalSentRef.current = true;
     try {
       await logoutMut.mutateAsync({ reason: 'USER_LOGOUT' });
     } catch {
@@ -246,7 +223,6 @@ export default function AgentPage() {
     } finally {
       localStorage.removeItem('token');
       localStorage.removeItem('role');
-      sessionStorage.removeItem(sessionStorageKey);
       navigate('/login', { replace: true });
     }
   };
@@ -274,91 +250,6 @@ export default function AgentPage() {
     }, 1000);
     return () => clearInterval(timer);
   }, [dialingBanner, qc]);
-
-  useEffect(() => {
-    lastKnownStatusRef.current = String(
-      c?.runtime?.agentStatus || active.data?.lead?.agentStatus || status.data?.status || ''
-    ).toUpperCase();
-  }, [c?.runtime?.agentStatus, active.data?.lead?.agentStatus, status.data?.status]);
-
-  useEffect(() => {
-    if (!localStorage.getItem('token')) {
-      return;
-    }
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled || heartbeatInFlightRef.current) {
-        return;
-      }
-      heartbeatInFlightRef.current = true;
-      try {
-        await agentSessionHeartbeat({
-          sessionId: browserSessionIdRef.current,
-          lastKnownVicidialStatus: lastKnownStatusRef.current,
-        });
-      } catch {
-        // silent: next interval retries
-      } finally {
-        heartbeatInFlightRef.current = false;
-      }
-    };
-
-    tick();
-    const timer = window.setInterval(tick, heartbeatIntervalMs);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
-    const notifyBrowserExit = () => {
-      if (exitSignalSentRef.current) {
-        return;
-      }
-      exitSignalSentRef.current = true;
-      const query = new URLSearchParams({
-        sessionId: browserSessionIdRef.current,
-        agentUser: profile.data?.agentUser || '',
-        reason: 'BROWSER_EXIT',
-      }).toString();
-      const endpoint = `${backendBaseUrl}/api/agent/session/browser-exit?${query}`;
-      const payload = JSON.stringify({
-        sessionId: browserSessionIdRef.current,
-        agentUser: profile.data?.agentUser,
-        reason: 'BROWSER_EXIT',
-      });
-      let delivered = false;
-      try {
-        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-          delivered = navigator.sendBeacon(endpoint);
-        }
-      } catch {
-        delivered = false;
-      }
-      if (!delivered) {
-        const token = localStorage.getItem('token');
-        fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: payload,
-          keepalive: true,
-        }).catch(() => {
-          // best effort
-        });
-      }
-    };
-
-    window.addEventListener('pagehide', notifyBrowserExit);
-    window.addEventListener('beforeunload', notifyBrowserExit);
-    return () => {
-      window.removeEventListener('pagehide', notifyBrowserExit);
-      window.removeEventListener('beforeunload', notifyBrowserExit);
-    };
-  }, [backendBaseUrl, profile.data?.agentUser]);
 
   useEffect(() => {
     if (!isManual2ByCampaign) {

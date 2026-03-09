@@ -31,7 +31,7 @@ public class AgentController {
   private final CustomerPhoneRepository phones;
   private final VicidialCredentialService credentialService;
   private final AgentVicidialSessionService vicidialSessionService;
-  private final UserRepository userRepository;
+  private final AgentSessionGuardService sessionGuardService;
   private final AgentVicidialCredentialRepository agentVicidialCredentialRepository;
   private final VicidialDialRequestBuilder dialRequestBuilder;
   private final VicidialDialResponseParser dialResponseParser;
@@ -49,7 +49,7 @@ public class AgentController {
       CustomerPhoneRepository phones,
       VicidialCredentialService credentialService,
       AgentVicidialSessionService vicidialSessionService,
-      UserRepository userRepository,
+      AgentSessionGuardService sessionGuardService,
       AgentVicidialCredentialRepository agentVicidialCredentialRepository,
       VicidialDialRequestBuilder dialRequestBuilder,
       VicidialDialResponseParser dialResponseParser,
@@ -65,7 +65,7 @@ public class AgentController {
     this.phones=phones;
     this.credentialService = credentialService;
     this.vicidialSessionService = vicidialSessionService;
-    this.userRepository = userRepository;
+    this.sessionGuardService = sessionGuardService;
     this.agentVicidialCredentialRepository = agentVicidialCredentialRepository;
     this.dialRequestBuilder = dialRequestBuilder;
     this.dialResponseParser = dialResponseParser;
@@ -83,8 +83,6 @@ public class AgentController {
   public record DialNextReq(@NotBlank String campaignId) {}
   public record ManualDialReq(@NotBlank String campaignId, @NotBlank String phoneNumber, String phoneCode, Integer dialTimeout, String dialPrefix, String preview) {}
   public record HangupReq(String campaignId, String dispo, String mode, Long leadId, String phoneNumber, String dni, String notes, Map<String, Object> extra) {}
-  public record SessionHeartbeatReq(String sessionId, String lastKnownVicidialStatus) {}
-  public record SessionBrowserExitReq(String sessionId, String agentUser, String reason) {}
   public record AgentLogoutReq(String reason) {}
   public record InteractionReq(@NotBlank String mode,Long leadId,@NotBlank String phoneNumber,@NotBlank String campaign,@NotBlank String dni,@NotBlank String dispo,String notes,Map<String,Object> extra){}
 
@@ -133,8 +131,8 @@ public class AgentController {
   @PostMapping("/vicidial/poll")
   Map<String, Object> pollVicidialSession(Authentication auth) {
     String agentUser = requireAuth(auth);
-    ensureAgentExists(agentUser);
-    var session = requireConnectedSession(agentUser);
+    sessionGuardService.ensureAgentExists(agentUser);
+    var session = sessionGuardService.requireConnectedSession(agentUser);
     String agentPass = credentialService.resolveAgentPass(agentUser)
         .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
             "VICIDIAL_AGENT_CREDENTIALS_MISSING",
@@ -160,12 +158,12 @@ public class AgentController {
   @GetMapping("/active-lead")
   Map<String,Object> active(Authentication auth){
     String agentUser = requireAuth(auth);
-    ensureAgentExists(agentUser);
-    var session = requireConnectedSession(agentUser);
-    requireSessionField(session.connectedPhoneLogin, "phone_login");
-    requireSessionField(session.connectedCampaign, "campaign");
-    requireSessionField(session.serverIp, "server_ip");
-    requireSessionField(session.sessionName, "session_name");
+    sessionGuardService.ensureAgentExists(agentUser);
+    var session = sessionGuardService.requireConnectedSession(agentUser);
+    sessionGuardService.requireSessionField(session.connectedPhoneLogin, "phone_login");
+    sessionGuardService.requireSessionField(session.connectedCampaign, "campaign");
+    sessionGuardService.requireSessionField(session.serverIp, "server_ip");
+    sessionGuardService.requireSessionField(session.sessionName, "session_name");
     if (session.agentLogId == null) {
       throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesión Vicidial está incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
     }
@@ -221,8 +219,8 @@ public class AgentController {
   @PostMapping("/vicidial/dial/next")
   Map<String, Object> dialNext(@RequestBody DialNextReq req, Authentication auth) {
     String agentUser = requireAuth(auth);
-    ensureAgentExists(agentUser);
-    var session = requireConnectedSession(agentUser);
+    sessionGuardService.ensureAgentExists(agentUser);
+    var session = sessionGuardService.requireConnectedSession(agentUser);
     String agentPass = credentialService.resolveAgentPass(agentUser)
         .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
             "VICIDIAL_AGENT_CREDENTIALS_MISSING",
@@ -245,42 +243,6 @@ public class AgentController {
     );
   }
 
-  @PostMapping("/session/heartbeat")
-  Map<String, Object> sessionHeartbeat(@RequestBody(required = false) SessionHeartbeatReq req, Authentication auth) {
-    String agentUser = requireAuth(auth);
-    String sessionId = req == null ? null : req.sessionId();
-    String lastKnownVicidialStatus = req == null ? null : req.lastKnownVicidialStatus();
-    var result = agentSessionLifecycleService.heartbeat(agentUser, sessionId, lastKnownVicidialStatus);
-    return Map.of(
-        "ok", result.ok(),
-        "sessionId", result.sessionId(),
-        "status", result.status(),
-        "connected", result.connected(),
-        "serverTime", result.serverTime()
-    );
-  }
-
-  @PostMapping("/session/browser-exit")
-  Map<String, Object> sessionBrowserExit(
-      @RequestBody(required = false) SessionBrowserExitReq req,
-      @RequestParam(required = false) String sessionId,
-      @RequestParam(required = false) String agentUser,
-      @RequestParam(required = false) String reason,
-      Authentication auth
-  ) {
-    String authenticatedUser = auth == null ? null : auth.getName();
-    String resolvedSessionId = firstNonBlank(req == null ? null : req.sessionId(), sessionId);
-    String resolvedAgentUser = firstNonBlank(req == null ? null : req.agentUser(), agentUser);
-    String resolvedReason = firstNonBlank(req == null ? null : req.reason(), reason);
-    var result = agentSessionLifecycleService.browserExit(authenticatedUser, resolvedAgentUser, resolvedSessionId, resolvedReason);
-    return Map.of(
-        "ok", result.ok(),
-        "updated", result.updated(),
-        "code", result.code(),
-        "serverTime", result.serverTime()
-    );
-  }
-
   @PostMapping("/logout")
   Map<String, Object> logoutAgent(@RequestBody(required = false) AgentLogoutReq req, Authentication auth) {
     String agentUser = requireAuth(auth);
@@ -294,6 +256,7 @@ public class AgentController {
     return response;
   }
 
+  @Deprecated(forRemoval = false, since = "1.2.0")
   @PostMapping("/vicidial/manual/next")
   Map<String, Object> backwardCompatibleDialNext(@RequestBody DialNextReq req, Authentication auth) {
     return dialNext(req, auth);
@@ -302,8 +265,8 @@ public class AgentController {
   @PostMapping("/vicidial/dial/manual")
   Map<String, Object> manualDial(@RequestBody ManualDialReq req, Authentication auth) {
     String agentUser = requireAuth(auth);
-    ensureAgentExists(agentUser);
-    var session = requireConnectedSession(agentUser);
+    sessionGuardService.ensureAgentExists(agentUser);
+    var session = sessionGuardService.requireConnectedSession(agentUser);
     String agentPass = credentialService.resolveAgentPass(agentUser)
         .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
             "VICIDIAL_AGENT_CREDENTIALS_MISSING",
@@ -485,12 +448,12 @@ public class AgentController {
   @GetMapping("/context")
   Map<String,Object> context(Authentication auth,@RequestParam(required=false) Long leadId){
     String agentUser = requireAuth(auth);
-    ensureAgentExists(agentUser);
-    var session = requireConnectedSession(agentUser);
-    requireSessionField(session.connectedPhoneLogin, "phone_login");
-    requireSessionField(session.connectedCampaign, "campaign");
-    requireSessionField(session.serverIp, "server_ip");
-    requireSessionField(session.sessionName, "session_name");
+    sessionGuardService.ensureAgentExists(agentUser);
+    var session = sessionGuardService.requireConnectedSession(agentUser);
+    sessionGuardService.requireSessionField(session.connectedPhoneLogin, "phone_login");
+    sessionGuardService.requireSessionField(session.connectedCampaign, "campaign");
+    sessionGuardService.requireSessionField(session.serverIp, "server_ip");
+    sessionGuardService.requireSessionField(session.sessionName, "session_name");
     if (session.agentLogId == null) {
       throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesion Vicidial esta incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
     }
@@ -633,8 +596,8 @@ public class AgentController {
   @PostMapping("/vicidial/call/hangup")
   Map<String, Object> hangupCall(@RequestBody(required = false) HangupReq req, Authentication auth) {
     String agentUser = requireAuth(auth);
-    ensureAgentExists(agentUser);
-    var session = requireConnectedSession(agentUser);
+    sessionGuardService.ensureAgentExists(agentUser);
+    var session = sessionGuardService.requireConnectedSession(agentUser);
     String agentPass = credentialService.resolveAgentPass(agentUser)
         .orElseThrow(() -> new VicidialServiceException(HttpStatus.UNPROCESSABLE_ENTITY,
             "VICIDIAL_AGENT_CREDENTIALS_MISSING",
@@ -813,8 +776,7 @@ public class AgentController {
   }
 
   private String requireAuth(Authentication auth) {
-    if (auth == null || auth.getName() == null || auth.getName().isBlank()) throw new RuntimeException("Unauthorized");
-    return auth.getName();
+    return sessionGuardService.requireAuth(auth);
   }
 
   private String extract(String raw, String key){
@@ -827,43 +789,6 @@ public class AgentController {
     return m.find() ? m.group(1) : "";
   }
   private Long extractLong(String raw,String key){ try{return Long.parseLong(extract(raw,key));}catch(Exception e){return null;} }
-
-  private void ensureAgentExists(String agentUser) {
-    if (userRepository.findByUsernameAndActiveTrue(agentUser).isEmpty()) {
-      throw new VicidialServiceException(HttpStatus.NOT_FOUND,
-          "AGENT_NOT_FOUND",
-          "No existe un agente activo para el usuario autenticado.");
-    }
-  }
-
-  private Entities.AgentVicidialCredentialEntity requireConnectedSession(String agentUser) {
-    var session = agentVicidialCredentialRepository.findByAppUsername(agentUser)
-        .orElseThrow(() -> new VicidialServiceException(
-            HttpStatus.CONFLICT,
-            "VICIDIAL_NOT_CONNECTED",
-            "El agente no tiene sesión Vicidial conectada.",
-            "conecte anexo/campaña primero",
-            null
-        ));
-    if (!session.connected) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT,
-          "VICIDIAL_NOT_CONNECTED",
-          "El agente no tiene sesión Vicidial conectada.",
-          "conecte anexo/campaña primero",
-          null);
-    }
-    return session;
-  }
-
-  private void requireSessionField(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT,
-          "VICIDIAL_SESSION_INCOMPLETE",
-          "La sesión Vicidial está incompleta.",
-          "Falta el campo requerido: " + field,
-          Map.of("missingField", field));
-    }
-  }
 
   private Long toLong(String value) {
     try {
@@ -1053,3 +978,5 @@ public class AgentController {
         && !"prod".equalsIgnoreCase(environment.getProperty("APP_ENV", environment.getProperty("app.env", "")));
   }
 }
+
+

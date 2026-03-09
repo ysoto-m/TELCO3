@@ -11,6 +11,11 @@ import jakarta.persistence.Table;
 
 import java.time.OffsetDateTime;
 
+/**
+ * Legacy domain (english naming) kept for compatibility with existing agent interactions endpoints.
+ * New campaign work should prefer {@link InteraccionEntity}.
+ */
+@Deprecated(forRemoval = false, since = "1.3.0")
 @Entity(name = "InteractionEntity")
 @Table(name = "interactions")
 public class InteractionEntity {
