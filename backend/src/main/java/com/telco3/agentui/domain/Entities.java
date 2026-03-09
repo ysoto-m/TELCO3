@@ -67,6 +67,14 @@ public class Entities {
     public String currentDialStatus;
     public String currentCallId;
     public Long currentLeadId;
+    public String crmSessionId;
+    public OffsetDateTime lastHeartbeatAt;
+    public OffsetDateTime lastBrowserExitAt;
+    public String sessionStatus;
+    public Integer cleanupAttempts = 0;
+    public String cleanupStatus;
+    public OffsetDateTime logoutTime;
+    public String lastKnownVicidialStatus;
     public OffsetDateTime connectedAt;
     public OffsetDateTime updatedAt = OffsetDateTime.now();
   }

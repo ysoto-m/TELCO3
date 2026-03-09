@@ -110,10 +110,15 @@ public class VicidialCredentialService {
     entity.connectedPhoneLogin = phoneLogin;
     entity.connectedCampaign = campaign;
     entity.connectedMode = emptyToNull(mode);
+    entity.sessionStatus = "ACTIVE";
+    entity.cleanupStatus = null;
+    entity.cleanupAttempts = 0;
     entity.currentDialStatus = null;
     entity.currentCallId = null;
     entity.currentLeadId = null;
     entity.connectedAt = OffsetDateTime.now();
+    entity.logoutTime = null;
+    entity.lastKnownVicidialStatus = null;
     entity.updatedAt = OffsetDateTime.now();
     repo.save(entity);
   }
@@ -143,6 +148,7 @@ public class VicidialCredentialService {
   public void updateSessionMode(String appUsername, String mode) {
     var entity = getOrCreate(appUsername);
     entity.connectedMode = emptyToNull(mode);
+    entity.sessionStatus = entity.connected ? "ACTIVE" : emptyToNull(entity.sessionStatus);
     entity.updatedAt = OffsetDateTime.now();
     repo.save(entity);
   }
@@ -162,6 +168,7 @@ public class VicidialCredentialService {
     entity.connectedPhoneLogin = null;
     entity.connectedCampaign = null;
     entity.connectedMode = null;
+    entity.sessionStatus = "DISCONNECTED";
     entity.currentDialStatus = null;
     entity.currentCallId = null;
     entity.currentLeadId = null;
@@ -172,6 +179,7 @@ public class VicidialCredentialService {
     entity.protocol = null;
     entity.agentLogId = null;
     entity.connectedAt = null;
+    entity.logoutTime = OffsetDateTime.now();
     entity.updatedAt = OffsetDateTime.now();
     repo.save(entity);
   }

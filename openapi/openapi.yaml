@@ -155,6 +155,43 @@ components:
       required: [action]
       properties:
         action: { type: string, enum: [PAUSE, RESUME] }
+    AgentSessionHeartbeatRequest:
+      type: object
+      properties:
+        sessionId: { type: string, nullable: true }
+        lastKnownVicidialStatus: { type: string, nullable: true }
+    AgentSessionHeartbeatResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        sessionId: { type: string }
+        status: { type: string }
+        connected: { type: boolean }
+        serverTime: { type: string, format: date-time }
+    AgentSessionBrowserExitRequest:
+      type: object
+      properties:
+        sessionId: { type: string, nullable: true }
+        agentUser: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+    AgentSessionBrowserExitResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        updated: { type: boolean }
+        code: { type: string }
+        serverTime: { type: string, format: date-time }
+    AgentLogoutRequest:
+      type: object
+      properties:
+        reason: { type: string, nullable: true }
+    AgentLogoutResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        hadSession: { type: boolean }
+        code: { type: string }
+        details: { type: object, additionalProperties: true }
     HangupRequest:
       type: object
       properties:
@@ -172,6 +209,73 @@ components:
         errors:
           type: array
           items: { type: string }
+    VicidialRealtimeSummaryResponse:
+      type: object
+      properties:
+        connectedAgents: { type: integer }
+        availableAgents: { type: integer }
+        incallAgents: { type: integer }
+        pausedAgents: { type: integer }
+        wrapupAgents: { type: integer }
+        answeredCalls: { type: integer }
+        abandonedCalls: { type: integer }
+        serviceLevelPercent: { type: integer }
+        averageWaitSeconds: { type: integer }
+        averageTalkSeconds: { type: integer }
+        generatedAt: { type: string, format: date-time }
+    VicidialRealtimeAgentItem:
+      type: object
+      properties:
+        agentUser: { type: string }
+        agentName: { type: string }
+        extension: { type: string, nullable: true }
+        campaignId: { type: string, nullable: true }
+        vicidialStatus: { type: string }
+        pauseCode: { type: string, nullable: true }
+        visibleStatus: { type: string }
+        subStatus: { type: string }
+        currentPhone: { type: string, nullable: true }
+        connectedTo: { type: string, nullable: true }
+        stateSeconds: { type: integer }
+        lastCallTime: { type: string, format: date-time, nullable: true }
+        completedToday: { type: integer }
+    VicidialRealtimeAgentsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/VicidialRealtimeAgentItem' }
+        total: { type: integer }
+        generatedAt: { type: string, format: date-time }
+    VicidialRealtimePauseCodeItem:
+      type: object
+      properties:
+        pauseCode: { type: string }
+        pauseName: { type: string }
+        visibleName: { type: string }
+        billable: { type: string }
+    VicidialRealtimePauseCodesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/VicidialRealtimePauseCodeItem' }
+        generatedAt: { type: string, format: date-time }
+    VicidialRealtimeCampaignsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { type: string }
+        generatedAt: { type: string, format: date-time }
+    VicidialLeadImportRequest:
+      type: object
+      required: [campaignId, listId]
+      properties:
+        campaignId: { type: string }
+        listId: { type: string }
+        fileToken: { type: string, nullable: true }
+        dryRun: { type: boolean, nullable: true }
 paths:
   /api/auth/login:
     post:
@@ -359,6 +463,44 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/OkResponse' }
+  /api/agent/session/heartbeat:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentSessionHeartbeatRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentSessionHeartbeatResponse' }
+  /api/agent/session/browser-exit:
+    post:
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentSessionBrowserExitRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentSessionBrowserExitResponse' }
+  /api/agent/logout:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentLogoutRequest' }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentLogoutResponse' }
   /api/agent/vicidial/call/hangup:
     post:
       security: [{ bearerAuth: [] }]
@@ -415,3 +557,51 @@ paths:
       responses:
         '200':
           description: csv
+  /api/admin/vicidial/realtime/summary:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VicidialRealtimeSummaryResponse' }
+  /api/admin/vicidial/realtime/agents:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: campaign, in: query, required: false, schema: { type: string } }
+        - { name: status, in: query, required: false, schema: { type: string } }
+        - { name: pauseCode, in: query, required: false, schema: { type: string } }
+        - { name: search, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VicidialRealtimeAgentsResponse' }
+  /api/admin/vicidial/realtime/pause-codes:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VicidialRealtimePauseCodesResponse' }
+  /api/admin/vicidial/realtime/campaigns:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VicidialRealtimeCampaignsResponse' }
+  /api/admin/vicidial/leads/import:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VicidialLeadImportRequest' }
+      responses:
+        '501':
+          description: Endpoint base no implementado todavía

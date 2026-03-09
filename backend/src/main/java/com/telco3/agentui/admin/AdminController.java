@@ -8,6 +8,7 @@ import com.telco3.agentui.domain.UserRepository;
 import com.telco3.agentui.domain.Entities.UserEntity;
 import com.telco3.agentui.settings.SettingsController;
 import com.telco3.agentui.vicidial.VicidialClient;
+import com.telco3.agentui.vicidial.VicidialRealtimeQueryService;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -27,14 +28,16 @@ public class AdminController {
   private final SettingsController settingsController;
   private final PasswordEncoder encoder;
   private final VicidialCredentialService credentialService;
+  private final VicidialRealtimeQueryService realtimeQueryService;
 
-  public AdminController(VicidialClient vicidial, InteractionRepository interactions, UserRepository users, SettingsController settingsController, PasswordEncoder encoder, VicidialCredentialService credentialService) {
+  public AdminController(VicidialClient vicidial, InteractionRepository interactions, UserRepository users, SettingsController settingsController, PasswordEncoder encoder, VicidialCredentialService credentialService, VicidialRealtimeQueryService realtimeQueryService) {
     this.vicidial = vicidial;
     this.interactions = interactions;
     this.users = users;
     this.settingsController = settingsController;
     this.encoder = encoder;
     this.credentialService = credentialService;
+    this.realtimeQueryService = realtimeQueryService;
   }
 
   @GetMapping("/summary")
@@ -93,9 +96,16 @@ public class AdminController {
   Map<String, Object> campaigns() {
     try {
       var raw = vicidial.campaigns();
-      var campaigns = raw.lines().filter(l -> !l.isBlank()).toList();
+      var campaigns = parseCampaigns(raw);
+      if (campaigns.isEmpty()) {
+        campaigns = realtimeQueryService.fetchCampaigns();
+      }
       return Map.of("items", campaigns, "degraded", false);
     } catch (Exception e) {
+      var vicidialDbCampaigns = realtimeQueryService.fetchCampaigns();
+      if (!vicidialDbCampaigns.isEmpty()) {
+        return Map.of("items", vicidialDbCampaigns, "degraded", false);
+      }
       return Map.of("items", interactions.findDistinctCampaigns(), "degraded", true, "message", "Usando campañas locales por degradación");
     }
   }
@@ -212,7 +222,56 @@ public class AdminController {
     return '"' + v.replace("\"", "\"\"") + '"';
   }
 
+  private List<String> parseCampaigns(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return List.of();
+    }
+    var campaigns = new LinkedHashSet<String>();
+
+    var byKey = java.util.regex.Pattern.compile("(?i)\\bcampaign_id\\s*[:=]\\s*([A-Z0-9_\\-]+)");
+    var matcher = byKey.matcher(raw);
+    while (matcher.find()) {
+      String campaign = matcher.group(1);
+      if (looksLikeCampaignId(campaign)) {
+        campaigns.add(campaign);
+      }
+    }
+
+    for (String line : raw.split("\\r?\\n")) {
+      String trimmed = line == null ? "" : line.trim();
+      if (trimmed.isEmpty()) {
+        continue;
+      }
+      if (trimmed.contains("=") || trimmed.toLowerCase(Locale.ROOT).contains("error")) {
+        continue;
+      }
+      for (String part : trimmed.split("[|,;\\t ]+")) {
+        if (looksLikeCampaignId(part)) {
+          campaigns.add(part);
+        }
+      }
+    }
+    return List.copyOf(campaigns);
+  }
+
+  private boolean looksLikeCampaignId(String value) {
+    if (value == null) {
+      return false;
+    }
+    String token = value.trim();
+    if (token.isEmpty()) {
+      return false;
+    }
+    String lower = token.toLowerCase(Locale.ROOT);
+    if (lower.equals("y") || lower.equals("n") || lower.equals("success") || lower.equals("campaign")) {
+      return false;
+    }
+    return token.matches("[A-Za-z0-9_\\-]{2,40}");
+  }
+
   private String emptyToNull(String value) {
     return value == null || value.isBlank() ? null : value;
   }
 }
+
+

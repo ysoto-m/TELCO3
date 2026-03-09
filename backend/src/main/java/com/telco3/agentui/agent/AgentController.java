@@ -3,6 +3,7 @@ package com.telco3.agentui.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.telco3.agentui.domain.*;
 import com.telco3.agentui.domain.Entities.*;
+import com.telco3.agentui.manual2.Manual2Service;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialDialRequestBuilder;
 import com.telco3.agentui.vicidial.VicidialDialResponseParser;
@@ -36,6 +37,8 @@ public class AgentController {
   private final VicidialDialResponseParser dialResponseParser;
   private final Environment environment;
   private final VicidialService vicidialService;
+  private final AgentSessionLifecycleService agentSessionLifecycleService;
+  private final Manual2Service manual2Service;
   private final boolean vicidialDebug;
   private final ObjectMapper mapper = new ObjectMapper();
 
@@ -52,6 +55,8 @@ public class AgentController {
       VicidialDialResponseParser dialResponseParser,
       Environment environment,
       VicidialService vicidialService,
+      AgentSessionLifecycleService agentSessionLifecycleService,
+      Manual2Service manual2Service,
       @Value("${app.vicidial.debug:false}") boolean vicidialDebug
   ){
     this.vicidial=vicidial;
@@ -66,6 +71,8 @@ public class AgentController {
     this.dialResponseParser = dialResponseParser;
     this.environment = environment;
     this.vicidialService = vicidialService;
+    this.agentSessionLifecycleService = agentSessionLifecycleService;
+    this.manual2Service = manual2Service;
     this.vicidialDebug = vicidialDebug;
   }
 
@@ -75,7 +82,10 @@ public class AgentController {
   public record CampaignConnectReq(@NotBlank String campaignId, Boolean rememberCredentials) {}
   public record DialNextReq(@NotBlank String campaignId) {}
   public record ManualDialReq(@NotBlank String campaignId, @NotBlank String phoneNumber, String phoneCode, Integer dialTimeout, String dialPrefix, String preview) {}
-  public record HangupReq(String campaignId, String dispo) {}
+  public record HangupReq(String campaignId, String dispo, String mode, Long leadId, String phoneNumber, String dni, String notes, Map<String, Object> extra) {}
+  public record SessionHeartbeatReq(String sessionId, String lastKnownVicidialStatus) {}
+  public record SessionBrowserExitReq(String sessionId, String agentUser, String reason) {}
+  public record AgentLogoutReq(String reason) {}
   public record InteractionReq(@NotBlank String mode,Long leadId,@NotBlank String phoneNumber,@NotBlank String campaign,@NotBlank String dni,@NotBlank String dispo,String notes,Map<String,Object> extra){}
 
   @GetMapping("/profile")
@@ -235,6 +245,55 @@ public class AgentController {
     );
   }
 
+  @PostMapping("/session/heartbeat")
+  Map<String, Object> sessionHeartbeat(@RequestBody(required = false) SessionHeartbeatReq req, Authentication auth) {
+    String agentUser = requireAuth(auth);
+    String sessionId = req == null ? null : req.sessionId();
+    String lastKnownVicidialStatus = req == null ? null : req.lastKnownVicidialStatus();
+    var result = agentSessionLifecycleService.heartbeat(agentUser, sessionId, lastKnownVicidialStatus);
+    return Map.of(
+        "ok", result.ok(),
+        "sessionId", result.sessionId(),
+        "status", result.status(),
+        "connected", result.connected(),
+        "serverTime", result.serverTime()
+    );
+  }
+
+  @PostMapping("/session/browser-exit")
+  Map<String, Object> sessionBrowserExit(
+      @RequestBody(required = false) SessionBrowserExitReq req,
+      @RequestParam(required = false) String sessionId,
+      @RequestParam(required = false) String agentUser,
+      @RequestParam(required = false) String reason,
+      Authentication auth
+  ) {
+    String authenticatedUser = auth == null ? null : auth.getName();
+    String resolvedSessionId = firstNonBlank(req == null ? null : req.sessionId(), sessionId);
+    String resolvedAgentUser = firstNonBlank(req == null ? null : req.agentUser(), agentUser);
+    String resolvedReason = firstNonBlank(req == null ? null : req.reason(), reason);
+    var result = agentSessionLifecycleService.browserExit(authenticatedUser, resolvedAgentUser, resolvedSessionId, resolvedReason);
+    return Map.of(
+        "ok", result.ok(),
+        "updated", result.updated(),
+        "code", result.code(),
+        "serverTime", result.serverTime()
+    );
+  }
+
+  @PostMapping("/logout")
+  Map<String, Object> logoutAgent(@RequestBody(required = false) AgentLogoutReq req, Authentication auth) {
+    String agentUser = requireAuth(auth);
+    String reason = req == null ? null : req.reason();
+    var result = agentSessionLifecycleService.logout(agentUser, reason);
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("ok", result.ok());
+    response.put("hadSession", result.hadSession());
+    response.put("code", result.code());
+    response.put("details", result.details());
+    return response;
+  }
+
   @PostMapping("/vicidial/manual/next")
   Map<String, Object> backwardCompatibleDialNext(@RequestBody DialNextReq req, Authentication auth) {
     return dialNext(req, auth);
@@ -384,6 +443,24 @@ public class AgentController {
     if (followUp.details() != null && !followUp.details().isEmpty()) {
       response.put("details", new LinkedHashMap<>(followUp.details()));
     }
+    if ("MANUAL2".equalsIgnoreCase(firstNonBlank(campaignId, payload.get("campaign"), session.connectedCampaign))) {
+      try {
+        manual2Service.registerInteractionStart(
+            agentUser,
+            new Manual2Service.RegisterInteractionRequest(
+                campaignId,
+                mode,
+                followUp.phoneNumber(),
+                followUp.leadId(),
+                followUp.callId(),
+                followUp.uniqueId(),
+                null
+            )
+        );
+      } catch (Exception ex) {
+        log.warn("Manual2 interaction start registration failed agent={} cause={}", agentUser, ex.getClass().getSimpleName());
+      }
+    }
     maybeAttachDebug(response, payload, rawSnippet);
     return response;
   }
@@ -516,30 +593,19 @@ public class AgentController {
   @PostMapping("/interactions")
   Map<String,Object> save(@RequestBody InteractionReq req, Authentication auth) throws Exception {
     String agentUser = requireAuth(auth);
-    var i = new InteractionEntity();
-    i.agentUser = agentUser;
-    i.mode = req.mode();
-    i.leadId = req.leadId();
-    i.phoneNumber = req.phoneNumber();
-    i.campaign = req.campaign();
-    i.dni = req.dni();
-    i.dispo = req.dispo();
-    i.notes = req.notes();
-    i.createdAt = OffsetDateTime.now();
-    i.extraJson = mapper.writeValueAsString(req.extra() == null ? Map.of() : req.extra());
-    customers.findByDni(req.dni()).ifPresent(c -> i.customerId = c.id);
+    assertFinalDispositionAllowed(agentUser);
 
-    agentVicidialCredentialRepository.findByAppUsername(agentUser)
-        .filter(s -> s.connected)
-        .ifPresent(session -> {
-          credentialService.resolveAgentPass(agentUser).ifPresent(agentPass -> {
-            try {
-              vicidialService.manualDialLogEnd(agentUser, agentPass, session, req.campaign(), req.leadId(), req.dispo());
-            } catch (Exception ex) {
-              log.warn("Vicidial manDiaLlogCaLL stage=end failed agent={} cause={}", agentUser, ex.getClass().getSimpleName());
-            }
-          });
-        });
+    var i = buildInteractionEntity(
+        agentUser,
+        req.mode(),
+        req.leadId(),
+        req.phoneNumber(),
+        req.campaign(),
+        req.dni(),
+        req.dispo(),
+        req.notes(),
+        req.extra()
+    );
 
     try {
       vicidial.externalStatus(agentUser, req.dispo(), req.leadId(), req.campaign());
@@ -578,6 +644,9 @@ public class AgentController {
     String campaignId = firstNonBlank(req == null ? null : req.campaignId(), session.connectedCampaign);
     String dispo = req == null ? null : req.dispo();
     var result = vicidialService.hangupActiveCall(agentUser, agentPass, session, campaignId, dispo);
+
+    InteractionEntity persistedInteraction = maybePersistHangupDisposition(agentUser, req, result, session, campaignId);
+
     Map<String, Object> response = new LinkedHashMap<>();
     response.put("ok", result.executed());
     response.put("code", result.executed() ? "VICIDIAL_HANGUP_SENT" : "VICIDIAL_HANGUP_NO_ACTIVE_CALL");
@@ -588,10 +657,160 @@ public class AgentController {
     response.put("channel", result.channel());
     response.put("agentStatus", result.agentStatus());
     response.put("details", result.details());
+    if (persistedInteraction != null) {
+      response.put("interactionSaved", true);
+      response.put("interactionId", persistedInteraction.id);
+      response.put("interactionSyncStatus", persistedInteraction.syncStatus.name());
+    } else {
+      response.put("interactionSaved", false);
+    }
     return response;
   }
   public record PauseReq(String action){}
   @PostMapping("/pause") Map<String,Object> pause(@RequestBody PauseReq req, Authentication auth){ vicidial.pause(requireAuth(auth),req.action()); return Map.of("ok",true); }
+
+  private void assertFinalDispositionAllowed(String agentUser) {
+    var sessionOpt = agentVicidialCredentialRepository.findByAppUsername(agentUser)
+        .filter(s -> s.connected);
+    if (sessionOpt.isEmpty()) {
+      return;
+    }
+    var session = sessionOpt.get();
+    String agentPass = credentialService.resolveAgentPass(agentUser).orElse(null);
+    if (!StringUtils.hasText(agentPass)) {
+      return;
+    }
+    var snapshot = vicidialService.resolveRealtimeCallSnapshot(
+        agentUser,
+        agentPass,
+        session,
+        session.currentCallId,
+        session.currentLeadId,
+        null,
+        session.connectedCampaign,
+        true
+    );
+    boolean dialingRuntime = "DIALING".equalsIgnoreCase(Objects.toString(session.currentDialStatus, ""));
+    boolean hasMediaEvidence = firstNonBlank(snapshot.uniqueId(), snapshot.channel()) != null;
+    boolean hasCallEvidence = firstNonBlank(snapshot.callId()) != null || snapshot.leadId() != null;
+    boolean callActive = dialingRuntime || (isInCallStatus(snapshot.agentStatus()) && (hasMediaEvidence || hasCallEvidence));
+    if (!callActive) {
+      return;
+    }
+
+    Map<String, Object> details = new LinkedHashMap<>();
+    details.put("classification", snapshot.classification());
+    details.put("agentStatus", snapshot.agentStatus());
+    details.put("callId", snapshot.callId());
+    details.put("leadId", snapshot.leadId());
+    details.put("uniqueId", snapshot.uniqueId());
+    details.put("channel", snapshot.channel());
+    throw new VicidialServiceException(
+        HttpStatus.CONFLICT,
+        "VICIDIAL_CALL_STILL_ACTIVE",
+        "No se puede guardar tipificacion final mientras la llamada sigue activa.",
+        "Cuelgue la llamada y luego confirme la tipificacion final.",
+        details
+    );
+  }
+
+  private InteractionEntity maybePersistHangupDisposition(
+      String agentUser,
+      HangupReq req,
+      VicidialService.HangupResult hangupResult,
+      Entities.AgentVicidialCredentialEntity session,
+      String fallbackCampaign
+  ) {
+    if (req == null || !StringUtils.hasText(req.dispo()) || hangupResult == null || !hangupResult.executed()) {
+      return null;
+    }
+    if (req.extra() != null) {
+      Object skipSave = req.extra().get("skipCrmInteractionSave");
+      if ("true".equalsIgnoreCase(Objects.toString(skipSave, "")) || Boolean.TRUE.equals(skipSave)) {
+        return null;
+      }
+    }
+    String campaign = firstNonBlank(req.campaignId(), fallbackCampaign, session.connectedCampaign);
+    String phoneNumber = firstNonBlank(req.phoneNumber());
+    String dni = firstNonBlank(req.dni());
+    String mode = firstNonBlank(req.mode(), session.connectedMode, "manual");
+    Long leadId = firstNonNull(req.leadId(), hangupResult.leadId(), session.currentLeadId);
+
+    if (!StringUtils.hasText(phoneNumber) && leadId == null) {
+      return null;
+    }
+
+    InteractionEntity interaction;
+    try {
+      Map<String, Object> extra = new LinkedHashMap<>();
+      if (req.extra() != null && !req.extra().isEmpty()) {
+        extra.putAll(req.extra());
+      }
+      extra.put("savedAfterHangup", true);
+      extra.put("hangupExecuted", hangupResult.executed());
+      extra.put("hangupClassification", hangupResult.classification());
+      interaction = buildInteractionEntity(
+          agentUser,
+          mode,
+          leadId,
+          phoneNumber,
+          campaign,
+          dni,
+          req.dispo(),
+          req.notes(),
+          extra
+      );
+    } catch (Exception ex) {
+      log.warn("Could not build interaction payload after hangup agent={} cause={}", agentUser, ex.getClass().getSimpleName());
+      return null;
+    }
+
+    Integer updateDispoHttpStatus = toInteger(hangupResult.details().get("updateDispoHttpStatus"));
+    boolean synced = hangupResult.executed() && (updateDispoHttpStatus == null || updateDispoHttpStatus < 400);
+    interaction.syncStatus = synced ? SyncStatus.SYNCED : SyncStatus.FAILED;
+    interaction.lastError = synced ? null : "Hangup flow did not confirm updateDISPO";
+    interactions.save(interaction);
+    return interaction;
+  }
+
+  private InteractionEntity buildInteractionEntity(
+      String agentUser,
+      String mode,
+      Long leadId,
+      String phoneNumber,
+      String campaign,
+      String dni,
+      String dispo,
+      String notes,
+      Map<String, Object> extra
+  ) throws Exception {
+    var interaction = new InteractionEntity();
+    interaction.agentUser = agentUser;
+    interaction.mode = mode;
+    interaction.leadId = leadId;
+    interaction.phoneNumber = phoneNumber;
+    interaction.campaign = campaign;
+    interaction.dni = dni;
+    interaction.dispo = dispo;
+    interaction.notes = notes;
+    interaction.createdAt = OffsetDateTime.now();
+    interaction.extraJson = mapper.writeValueAsString(extra == null ? Map.of() : extra);
+    if (StringUtils.hasText(dni)) {
+      customers.findByDni(dni).ifPresent(c -> interaction.customerId = c.id);
+    }
+    return interaction;
+  }
+
+  private Integer toInteger(Object value) {
+    if (value == null) {
+      return null;
+    }
+    try {
+      return Integer.parseInt(Objects.toString(value, "").trim());
+    } catch (Exception ex) {
+      return null;
+    }
+  }
 
   private String requireAuth(Authentication auth) {
     if (auth == null || auth.getName() == null || auth.getName().isBlank()) throw new RuntimeException("Unauthorized");
@@ -674,6 +893,15 @@ public class AgentController {
   private String firstNonBlank(String... values) {
     for (String value : values) {
       if (value != null && !value.isBlank()) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private Long firstNonNull(Long... values) {
+    for (Long value : values) {
+      if (value != null) {
         return value;
       }
     }

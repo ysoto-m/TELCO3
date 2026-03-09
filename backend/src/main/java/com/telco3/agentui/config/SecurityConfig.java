@@ -75,6 +75,7 @@ public class SecurityConfig {
         .requestMatchers(CorsUtils::isPreFlightRequest).permitAll()
         .requestMatchers(HttpMethod.OPTIONS, "/api/**").permitAll()
         .requestMatchers("/api/auth/**", "/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll()
+        .requestMatchers(HttpMethod.POST, "/api/agent/session/browser-exit").permitAll()
         .requestMatchers("/api/settings/**","/api/vicidial/**","/api/reports/**","/api/admin/**").hasRole("REPORT_ADMIN")
         .anyRequest().authenticated())
       .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

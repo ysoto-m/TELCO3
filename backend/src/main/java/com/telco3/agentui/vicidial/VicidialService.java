@@ -389,6 +389,164 @@ public class VicidialService {
     credentialService.updateDialRuntime(agentUser, null, null, null);
   }
 
+  public PostCallSyncResult syncPostCallDisposition(
+      String agentUser,
+      String agentPass,
+      Entities.AgentVicidialCredentialEntity session,
+      String campaignId,
+      Long leadIdHint,
+      String callIdHint,
+      String uniqueIdHint,
+      String phoneNumberHint,
+      String dispo
+  ) {
+    Map<String, Object> details = new LinkedHashMap<>();
+    if (!StringUtils.hasText(agentPass)) {
+      return new PostCallSyncResult(false, null, "Missing agent_pass", details);
+    }
+
+    String resolvedCampaign = firstNonBlank(campaignId, session.connectedCampaign);
+    Map<String, String> basePayload = buildAgentRuntimePayload(agentUser, agentPass, session, resolvedCampaign);
+    RealtimeCallSnapshot snapshot = resolveRealtimeCallSnapshot(
+        agentUser,
+        agentPass,
+        session,
+        firstNonBlank(callIdHint, session.currentCallId),
+        firstNonNull(leadIdHint, session.currentLeadId),
+        phoneNumberHint,
+        resolvedCampaign,
+        true
+    );
+
+    String callId = firstNonBlank(callIdHint, snapshot.callId(), session.currentCallId);
+    Long leadId = firstNonNull(leadIdHint, snapshot.leadId(), session.currentLeadId);
+    String uniqueId = firstNonBlank(uniqueIdHint, snapshot.uniqueId());
+    String channel = firstNonBlank(snapshot.channel());
+    String phoneNumber = firstNonBlank(phoneNumberHint, snapshot.phoneNumber());
+    String confExten = normalizeConfExten(session.confExten, session.connectedPhoneLogin);
+    String listId = resolveManualDialListId(resolvedCampaign).orElse(null);
+    String recordingFilename = buildRecordingFilename(phoneNumber, callId, uniqueId);
+
+    details.put("callId", callId);
+    details.put("leadId", leadId);
+    details.put("uniqueId", uniqueId);
+    details.put("channel", channel);
+    details.put("campaign", resolvedCampaign);
+    details.put("recordingFilename", recordingFilename);
+
+    if (leadId == null) {
+      return new PostCallSyncResult(false, recordingFilename, "Missing lead_id", details);
+    }
+
+    var callbacksResult = client.callbacksCount(agentUser, basePayload);
+    details.put("callbacksCountHttpStatus", callbacksResult.statusCode());
+
+    Map<String, String> logEndPayload = buildLogPayload(
+        basePayload,
+        session,
+        callId,
+        leadId,
+        uniqueId,
+        channel,
+        phoneNumber,
+        resolvedCampaign,
+        listId
+    );
+    if (StringUtils.hasText(dispo)) {
+      logEndPayload.put("status", dispo);
+    }
+    var logEndResult = client.manualDialLogCall(agentUser, logEndPayload, "end");
+    details.put("logEndHttpStatus", logEndResult.statusCode());
+
+    Map<String, String> updateLeadPayload = buildUpdateLeadPayload(basePayload, leadId, phoneNumber, resolvedCampaign);
+    var updateLeadResult = client.updateLead(agentUser, updateLeadPayload);
+    details.put("updateLeadHttpStatus", updateLeadResult.statusCode());
+
+    Map<String, String> updateDispoPayload = buildUpdateDispoPayload(
+        basePayload,
+        session,
+        resolvedCampaign,
+        callId,
+        leadId,
+        uniqueId,
+        channel,
+        phoneNumber,
+        listId,
+        firstNonBlank(dispo, "N"),
+        confExten
+    );
+    var updateDispoResult = client.updateDispo(agentUser, updateDispoPayload);
+    details.put("updateDispoHttpStatus", updateDispoResult.statusCode());
+
+    Map<String, String> runUrlsPayload = buildRunUrlsPayload(basePayload, resolvedCampaign);
+    var runUrlsResult = client.runUrls(agentUser, runUrlsPayload);
+    details.put("runUrlsHttpStatus", runUrlsResult.statusCode());
+
+    var updateSettingsResult = client.updateSettings(agentUser, basePayload);
+    details.put("updateSettingsHttpStatus", updateSettingsResult.statusCode());
+
+    boolean synced = updateLeadResult.statusCode() < 400
+        && updateDispoResult.statusCode() < 400
+        && runUrlsResult.statusCode() < 400;
+    if (synced) {
+      credentialService.updateDialRuntime(agentUser, null, null, null);
+      return new PostCallSyncResult(true, recordingFilename, null, details);
+    }
+    return new PostCallSyncResult(false, recordingFilename, "Post-call AGC sequence failed", details);
+  }
+
+  public LogoutFlowResult logoutAgentSession(
+      String agentUser,
+      String agentPass,
+      Entities.AgentVicidialCredentialEntity session
+  ) {
+    Map<String, Object> details = new LinkedHashMap<>();
+    if (!StringUtils.hasText(agentPass)) {
+      details.put("error", "MISSING_AGENT_PASS");
+      return new LogoutFlowResult(false, false, false, details);
+    }
+
+    String campaign = firstNonBlank(session.connectedCampaign, "");
+    Map<String, String> basePayload = buildAgentRuntimePayload(agentUser, agentPass, session, campaign);
+    String mdNextCid = firstNonBlank(session.currentCallId, "");
+
+    ConfCheckSnapshot confBefore = executeLogoutConfExtenCheck(agentUser, basePayload, mdNextCid, "");
+    String phoneIp = confBefore.phoneIp();
+    details.put("confBeforeHttpStatus", confBefore.httpStatus());
+    details.put("beforeLoggedIn", confBefore.loggedIn());
+    details.put("beforeStatus", confBefore.status());
+
+    ConfCheckSnapshot confLogoutClick = executeLogoutConfExtenCheck(agentUser, basePayload, mdNextCid, "NormalLogout---LogouT---NORMAL");
+    phoneIp = firstNonBlank(phoneIp, confLogoutClick.phoneIp());
+    details.put("confLogoutClickHttpStatus", confLogoutClick.httpStatus());
+    details.put("clickLoggedIn", confLogoutClick.loggedIn());
+    details.put("clickStatus", confLogoutClick.status());
+
+    String dialMethod = resolveLogoutDialMethod(session, campaign);
+    Map<String, String> logoutPayload = buildUserLogoutPayload(basePayload, session, campaign, phoneIp, dialMethod);
+    var userLogoutResult = client.userLogout(agentUser, logoutPayload);
+    String userLogoutBody = Objects.toString(userLogoutResult.body(), "");
+    boolean userLogoutAccepted = userLogoutBody.contains("1||1|1|")
+        || userLogoutBody.toUpperCase(Locale.ROOT).contains("SUCCESS");
+    details.put("userLogoutHttpStatus", userLogoutResult.statusCode());
+    details.put("userLogoutAccepted", userLogoutAccepted);
+    details.put("userLogoutSnippet", userLogoutResult.snippet(180));
+
+    ConfCheckSnapshot confAfter = executeLogoutConfExtenCheck(agentUser, basePayload, mdNextCid, "");
+    details.put("confAfterHttpStatus", confAfter.httpStatus());
+    details.put("afterLoggedIn", confAfter.loggedIn());
+    details.put("afterStatus", confAfter.status());
+
+    boolean loggedOutConfirmed = "N".equalsIgnoreCase(confAfter.loggedIn())
+        || "N".equalsIgnoreCase(confLogoutClick.loggedIn());
+    boolean flowExecuted = confBefore.httpStatus() > 0
+        && confLogoutClick.httpStatus() > 0
+        && userLogoutResult.statusCode() > 0;
+    details.put("flowExecuted", flowExecuted);
+    details.put("loggedOutConfirmed", loggedOutConfirmed);
+    return new LogoutFlowResult(flowExecuted, userLogoutAccepted, loggedOutConfirmed, details);
+  }
+
   public HangupResult hangupActiveCall(
       String agentUser,
       String agentPass,
@@ -426,6 +584,7 @@ public class VicidialService {
     details.put("uniqueId", uniqueId);
     details.put("channel", channel);
     details.put("agentStatus", agentStatus);
+    details.put("recordingFilename", buildRecordingFilename(phoneNumber, callId, uniqueId));
 
     if (!StringUtils.hasText(callId) && leadId == null && !StringUtils.hasText(channel) && !isInCallStatus(agentStatus)) {
       credentialService.updateDialRuntime(agentUser, null, null, null);
@@ -460,7 +619,7 @@ public class VicidialService {
     var logEndResult = client.manualDialLogCall(agentUser, logEndPayload, "end");
     details.put("logEndHttpStatus", logEndResult.statusCode());
 
-    if (leadId != null) {
+    if (leadId != null && StringUtils.hasText(dispo)) {
       Map<String, String> updateLeadPayload = buildUpdateLeadPayload(basePayload, leadId, phoneNumber, resolvedCampaign);
       var updateLeadResult = client.updateLead(agentUser, updateLeadPayload);
       details.put("updateLeadHttpStatus", updateLeadResult.statusCode());
@@ -484,6 +643,8 @@ public class VicidialService {
       Map<String, String> runUrlsPayload = buildRunUrlsPayload(basePayload, resolvedCampaign);
       var runUrlsResult = client.runUrls(agentUser, runUrlsPayload);
       details.put("runUrlsHttpStatus", runUrlsResult.statusCode());
+    } else if (leadId != null) {
+      details.put("dispositionDeferred", true);
     }
 
     var updateSettingsResult = client.updateSettings(agentUser, basePayload);
@@ -851,6 +1012,45 @@ public class VicidialService {
     return payload;
   }
 
+  private Map<String, String> buildUserLogoutPayload(
+      Map<String, String> basePayload,
+      Entities.AgentVicidialCredentialEntity session,
+      String campaign,
+      String phoneIp,
+      String dialMethod
+  ) {
+    Map<String, String> payload = new LinkedHashMap<>(basePayload);
+    String confExten = normalizeConfExten(session.confExten, session.connectedPhoneLogin);
+    String extension = firstNonBlank(
+        normalizeEndpointDigits(session.connectedPhoneLogin),
+        normalizeEndpointDigits(session.extension),
+        normalizeEndpointDigits(resolveDialExten(session)),
+        session.connectedPhoneLogin,
+        session.extension,
+        resolveDialExten(session),
+        ""
+    );
+    payload.put("session_name", Objects.toString(basePayload.get("session_name"), ""));
+    payload.put("server_ip", Objects.toString(basePayload.get("server_ip"), ""));
+    payload.put("campaign", Objects.toString(campaign, ""));
+    payload.put("conf_exten", Objects.toString(confExten, ""));
+    payload.put("phone_login", Objects.toString(session.connectedPhoneLogin, ""));
+    payload.put("extension", Objects.toString(extension, ""));
+    payload.put("protocol", firstNonBlank(resolveProtocol(session), "SIP"));
+    payload.put("agent_log_id", Objects.toString(session.agentLogId, ""));
+    payload.put("no_delete_sessions", "1");
+    payload.put("phone_ip", Objects.toString(phoneIp, ""));
+    payload.put("enable_sipsak_messages", "0");
+    payload.put("LogouTKicKAlL", "1");
+    payload.put("ext_context", "default");
+    payload.put("qm_extension", Objects.toString(extension, ""));
+    payload.put("stage", "NORMAL");
+    payload.put("dial_method", firstNonBlank(dialMethod, "MANUAL"));
+    payload.put("pause_max_url_trigger", "");
+    payload.put("format", "text");
+    return payload;
+  }
+
   private Map<String, String> buildMonitorConfPayload(
       Map<String, String> basePayload,
       Entities.AgentVicidialCredentialEntity session,
@@ -1135,6 +1335,61 @@ public class VicidialService {
       return containsPlaceholderToken(protocol) ? "" : protocol;
     }
     return "";
+  }
+
+  private String resolveLogoutDialMethod(Entities.AgentVicidialCredentialEntity session, String campaign) {
+    try {
+      if (StringUtils.hasText(campaign)) {
+        String fromCampaign = firstNonBlank(campaignMode(campaign).dialMethodRaw());
+        if (StringUtils.hasText(fromCampaign)) {
+          return fromCampaign.trim().toUpperCase(Locale.ROOT);
+        }
+      }
+    } catch (Exception ignored) {
+      // fallback to session mode below
+    }
+    String fromMode = firstNonBlank(session.connectedMode);
+    if (!StringUtils.hasText(fromMode)) {
+      return "MANUAL";
+    }
+    String normalized = fromMode.trim().toUpperCase(Locale.ROOT);
+    if ("MANUAL".equals(normalized)) {
+      return "MANUAL";
+    }
+    if ("PREDICTIVE".equals(normalized)) {
+      return "RATIO";
+    }
+    return normalized;
+  }
+
+  private String normalizeLoggedIn(String value) {
+    if (!StringUtils.hasText(value)) {
+      return "";
+    }
+    String normalized = value.trim().toUpperCase(Locale.ROOT);
+    if (normalized.startsWith("Y")) {
+      return "Y";
+    }
+    if (normalized.startsWith("N")) {
+      return "N";
+    }
+    return normalized;
+  }
+
+  private ConfCheckSnapshot executeLogoutConfExtenCheck(
+      String agentUser,
+      Map<String, String> basePayload,
+      String mdNextCid,
+      String clicks
+  ) {
+    Map<String, String> payload = buildConfExtenCheckPayload(basePayload, mdNextCid, "", 0, true);
+    payload.put("clicks", Objects.toString(clicks, ""));
+    var result = client.confExtenCheck(agentUser, payload);
+    Map<String, String> parsed = client.parseKeyValueLines(result.body());
+    String loggedIn = normalizeLoggedIn(firstPresent(parsed, "logged_in", "loggedin"));
+    String status = firstNonBlank(firstPresent(parsed, "status", "agent_status"), extractAgentStatus(parsed));
+    String phoneIp = firstPresent(parsed, "phone_ip", "phoneip");
+    return new ConfCheckSnapshot(result.statusCode(), loggedIn, status, phoneIp);
   }
 
   private String normalizeConfExten(String confExten, String fallback) {
@@ -1593,6 +1848,30 @@ public class VicidialService {
       String channel,
       String agentStatus,
       Map<String, Object> details
+  ) {
+  }
+
+  public record PostCallSyncResult(
+      boolean synced,
+      String recordingFilename,
+      String error,
+      Map<String, Object> details
+  ) {
+  }
+
+  public record LogoutFlowResult(
+      boolean executed,
+      boolean userLogoutAccepted,
+      boolean loggedOutConfirmed,
+      Map<String, Object> details
+  ) {
+  }
+
+  private record ConfCheckSnapshot(
+      int httpStatus,
+      String loggedIn,
+      String status,
+      String phoneIp
   ) {
   }
 

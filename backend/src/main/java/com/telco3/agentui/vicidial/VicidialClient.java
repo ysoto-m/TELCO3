@@ -290,6 +290,13 @@ public class VicidialClient {
     return executeVdcQueryWithCookies(agentUser, payload);
   }
 
+  public VicidialHttpResult userLogout(String agentUser, Map<String, String> params) {
+    Map<String, String> payload = new LinkedHashMap<>(params);
+    payload.put("ACTION", "userLOGout");
+    payload.putIfAbsent("format", "text");
+    return executeVdcQueryWithCookies(agentUser, payload);
+  }
+
   public ManualDialOutcome evaluateManualDialBody(String body) {
     String normalized = normalize(body);
     if (containsLoginForm(body)
@@ -910,6 +917,13 @@ public class VicidialClient {
       return "**";
     }
     return agentUser.substring(0, 2) + "***";
+  }
+
+  public void clearAgentCookies(String agentUser) {
+    if (!StringUtils.hasText(agentUser)) {
+      return;
+    }
+    cookieSessions.remove(agentUser.trim());
   }
 
   private URI resolveUri(String baseUrl, String path) {

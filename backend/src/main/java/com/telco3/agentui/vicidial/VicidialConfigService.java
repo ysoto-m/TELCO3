@@ -14,10 +14,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class VicidialConfigService {
+  private static final String MASKED_SECRET = "********";
   public static final String KEY_BASE_URL = "VICIDIAL_BASE_URL";
   public static final String KEY_API_USER = "VICIDIAL_API_USER";
   public static final String KEY_API_PASS = "VICIDIAL_API_PASS";
@@ -31,6 +33,21 @@ public class VicidialConfigService {
   public static final String KEY_API_USER_LOWER = "vicidial.apiUser";
   public static final String KEY_API_PASS_LOWER = "vicidial.apiPass";
   public static final String KEY_SOURCE_LOWER = "vicidial.source";
+  private static final Set<String> TRACKED_CONFIG_KEYS = Set.of(
+      KEY_BASE_URL,
+      KEY_API_USER,
+      KEY_API_PASS,
+      KEY_SOURCE,
+      KEY_DB_HOST,
+      KEY_DB_PORT,
+      KEY_DB_NAME,
+      KEY_DB_USER,
+      KEY_DB_PASS,
+      KEY_BASE_URL_LOWER,
+      KEY_API_USER_LOWER,
+      KEY_API_PASS_LOWER,
+      KEY_SOURCE_LOWER
+  );
 
   private final AppConfigRepository configRepository;
   private final Environment environment;
@@ -96,28 +113,16 @@ public class VicidialConfigService {
   }
 
   public void saveConfig(VicidialConfigUpdateRequest request) {
-    upsert(KEY_BASE_URL_LOWER, cleanBaseUrl(request.baseUrl()), false);
-    upsert(KEY_API_USER_LOWER, trim(request.apiUser()), false);
-    upsert(KEY_API_PASS_LOWER, trim(request.apiPass()), true);
+    upsertIfHasText(KEY_BASE_URL_LOWER, cleanBaseUrl(request.baseUrl()), false);
+    upsertIfHasText(KEY_API_USER_LOWER, trim(request.apiUser()), false);
+    upsertSecretIfProvided(KEY_API_PASS_LOWER, request.apiPass());
 
-    if (StringUtils.hasText(request.source())) {
-      upsert(KEY_SOURCE_LOWER, trim(request.source()), false);
-    }
-    if (StringUtils.hasText(request.dbHost())) {
-      upsert(KEY_DB_HOST, trim(request.dbHost()), false);
-    }
-    if (StringUtils.hasText(request.dbPort())) {
-      upsert(KEY_DB_PORT, trim(request.dbPort()), false);
-    }
-    if (StringUtils.hasText(request.dbName())) {
-      upsert(KEY_DB_NAME, trim(request.dbName()), false);
-    }
-    if (StringUtils.hasText(request.dbUser())) {
-      upsert(KEY_DB_USER, trim(request.dbUser()), false);
-    }
-    if (StringUtils.hasText(request.dbPass())) {
-      upsert(KEY_DB_PASS, trim(request.dbPass()), true);
-    }
+    upsertIfHasText(KEY_SOURCE_LOWER, trim(request.source()), false);
+    upsertIfHasText(KEY_DB_HOST, trim(request.dbHost()), false);
+    upsertIfHasText(KEY_DB_PORT, trim(request.dbPort()), false);
+    upsertIfHasText(KEY_DB_NAME, trim(request.dbName()), false);
+    upsertIfHasText(KEY_DB_USER, trim(request.dbUser()), false);
+    upsertSecretIfProvided(KEY_DB_PASS, request.dbPass());
     configVersion.incrementAndGet();
   }
 
@@ -171,24 +176,26 @@ public class VicidialConfigService {
   }
 
   private ValueWithOrigin resolveValue(String[] keys, boolean encrypted) {
-    String matchedKey = null;
-    String fromDb = null;
     for (String key : keys) {
-      fromDb = getStored(key);
-      if (StringUtils.hasText(fromDb)) {
-        matchedKey = key;
-        break;
+      String fromDb = getStored(key);
+      if (!StringUtils.hasText(fromDb)) {
+        continue;
       }
-    }
-    if (StringUtils.hasText(fromDb)) {
       if (encrypted) {
         try {
-          return new ValueWithOrigin(decrypt(fromDb), "DB:" + matchedKey);
+          String decrypted = decrypt(fromDb);
+          if (isMaskedSecret(decrypted)) {
+            continue;
+          }
+          return new ValueWithOrigin(decrypted, "DB:" + key);
         } catch (Exception ex) {
-          return new ValueWithOrigin(null, "DB_INVALID:" + matchedKey);
+          return new ValueWithOrigin(null, "DB_INVALID:" + key);
         }
       }
-      return new ValueWithOrigin(fromDb, "DB:" + matchedKey);
+      if (isMaskedSecret(fromDb)) {
+        continue;
+      }
+      return new ValueWithOrigin(fromDb, "DB:" + key);
     }
 
     String fromEnv = null;
@@ -217,11 +224,30 @@ public class VicidialConfigService {
 
   private OffsetDateTime resolveLatestUpdateAt() {
     return configRepository.findAll().stream()
-        .filter(c -> c.key != null && c.key.startsWith("VICIDIAL_"))
+        .filter(c -> c.key != null && TRACKED_CONFIG_KEYS.contains(c.key))
         .map(c -> c.updatedAt)
         .filter(Objects::nonNull)
         .max(OffsetDateTime::compareTo)
         .orElse(null);
+  }
+
+  private void upsertIfHasText(String key, String value, boolean encrypted) {
+    if (!StringUtils.hasText(value)) {
+      return;
+    }
+    upsert(key, value, encrypted);
+  }
+
+  private void upsertSecretIfProvided(String key, String value) {
+    String secret = trim(value);
+    if (!StringUtils.hasText(secret) || isMaskedSecret(secret)) {
+      return;
+    }
+    upsert(key, secret, true);
+  }
+
+  private boolean isMaskedSecret(String value) {
+    return MASKED_SECRET.equals(trim(value));
   }
 
   private String encrypt(String raw) {

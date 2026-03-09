@@ -14,9 +14,11 @@ import {
   Typography,
 } from '@mui/material';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  agentLogout,
+  agentSessionHeartbeat,
   connectVicidialCampaign,
   dialNext,
   connectVicidialPhone,
@@ -25,6 +27,10 @@ import {
   getAgentProfile,
   getContext,
   hangupCall,
+  manual2Dispositions,
+  manual2LookupContact,
+  manual2SaveGestion,
+  manual2Subtipificaciones,
   manualDial,
   getVicidialCampaigns,
   getVicidialStatus,
@@ -38,12 +44,42 @@ import {
 import AuthStepper from '../components/ui/AuthStepper';
 import ViciCard from '../components/ui/ViciCard';
 
+const heartbeatIntervalMs = 15000;
+const sessionStorageKey = 'agent.crm.session.id';
+
+function ensureBrowserSessionId(): string {
+  const existing = sessionStorage.getItem(sessionStorageKey);
+  if (existing) {
+    return existing;
+  }
+  const generated = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
+  sessionStorage.setItem(sessionStorageKey, generated);
+  return generated;
+}
+
 export default function AgentPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const env = (import.meta as any).env || {};
   const defaultPhoneCode = ((import.meta as any).env?.VITE_DEFAULT_PHONE_CODE || '1').toString();
+  const backendBaseUrl = ((env.VITE_BACKEND_BASE_URL || env.VITE_API_BASE_URL || 'http://localhost:8080') as string).replace(/\/$/, '');
+  const browserSessionIdRef = useRef<string>(ensureBrowserSessionId());
+  const heartbeatInFlightRef = useRef(false);
+  const exitSignalSentRef = useRef(false);
+  const lastKnownStatusRef = useRef('');
   const [dispo, setDispo] = useState('');
   const [notes, setNotes] = useState('');
+  const [manual2Form, setManual2Form] = useState({
+    nombres: '',
+    apellidos: '',
+    documento: '',
+    origen: 'MANUAL2',
+    comentario: '',
+    subtipificacion: '',
+  });
+  const hydratedManual2PhoneRef = useRef('');
   const [phoneLogin, setPhoneLogin] = useState('');
   const [campaign, setCampaign] = useState('');
   const [remember, setRemember] = useState(true);
@@ -52,13 +88,6 @@ export default function AgentPage() {
   const [manualNumber, setManualNumber] = useState('');
   const [manualCode, setManualCode] = useState(defaultPhoneCode);
   const [dialingBanner, setDialingBanner] = useState(false);
-
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('role');
-    sessionStorage.clear();
-    navigate('/login', { replace: true });
-  };
 
   const profile = useQuery({ queryKey: ['agent-profile'], queryFn: getAgentProfile });
   const status = useQuery({ queryKey: ['status'], queryFn: getVicidialStatus, refetchInterval: 10000 });
@@ -72,7 +101,10 @@ export default function AgentPage() {
     queryKey: ['active-lead'],
     queryFn: getActiveLead,
     enabled: Boolean(status.data?.campaign),
-    refetchInterval: status.data?.mode === 'manual' ? false : 7000,
+    refetchInterval: status.data?.campaign
+      ? (status.data?.mode === 'manual' ? 2500 : 7000)
+      : false,
+    refetchIntervalInBackground: true,
   });
 
   const leadId = Number(active.data?.lead?.leadId || active.data?.leadId || 0) || undefined;
@@ -89,10 +121,39 @@ export default function AgentPage() {
     queryKey: ['context', leadId],
     queryFn: () => getContext({ leadId }),
     enabled: Boolean(status.data?.campaign),
+    refetchInterval: status.data?.campaign
+      ? (status.data?.mode === 'manual' ? 2500 : 7000)
+      : false,
+    refetchIntervalInBackground: true,
   });
+  const c: any = context.data;
 
   const mode = (campaignDetails.data?.campaign?.mode || context.data?.mode || 'predictive') as 'predictive' | 'manual';
   const isManualFlow = mode === 'manual';
+  const runtimeCampaignForManual2 = status.data?.campaign || campaign || '';
+  const isManual2ByCampaign = runtimeCampaignForManual2.toUpperCase() === 'MANUAL2';
+  const runtimeLeadPhone = c?.lead?.phoneNumber || active.data?.lead?.phoneNumber || manualNumber || '';
+  const normalizedRuntimeLeadPhone = runtimeLeadPhone.replace(/[^0-9]/g, '');
+
+  const manual2DispositionsQuery = useQuery({
+    queryKey: ['manual2-dispositions', runtimeCampaignForManual2],
+    queryFn: () => manual2Dispositions(runtimeCampaignForManual2 || 'Manual2'),
+    enabled: Boolean(runtimeCampaignForManual2) && isManual2ByCampaign,
+    staleTime: 30000,
+  });
+
+  const manual2SubtipificacionesQuery = useQuery({
+    queryKey: ['manual2-subtipificaciones', runtimeCampaignForManual2, dispo],
+    queryFn: () => manual2Subtipificaciones(runtimeCampaignForManual2 || 'Manual2', dispo || undefined),
+    enabled: Boolean(runtimeCampaignForManual2) && isManual2ByCampaign,
+    staleTime: 30000,
+  });
+
+  const manual2ContactQuery = useQuery({
+    queryKey: ['manual2-contact', normalizedRuntimeLeadPhone],
+    queryFn: () => manual2LookupContact(normalizedRuntimeLeadPhone),
+    enabled: isManual2ByCampaign && normalizedRuntimeLeadPhone.length >= 6,
+  });
 
   const connectPhone = useMutation({
     mutationFn: connectVicidialPhone,
@@ -128,6 +189,25 @@ export default function AgentPage() {
   });
 
   const save = useMutation({ mutationFn: saveInteraction });
+  const saveManual2GestionMut = useMutation({
+    mutationFn: manual2SaveGestion,
+    onSuccess: () => {
+      setDispo('');
+      setNotes('');
+      setManual2Form({
+        nombres: '',
+        apellidos: '',
+        documento: '',
+        origen: 'MANUAL2',
+        comentario: '',
+        subtipificacion: '',
+      });
+      hydratedManual2PhoneRef.current = '';
+      qc.invalidateQueries({ queryKey: ['manual2-contact'] });
+      qc.invalidateQueries({ queryKey: ['manual2-history'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
 
   const manualNext = useMutation({
     mutationFn: dialNext,
@@ -145,6 +225,8 @@ export default function AgentPage() {
     },
   });
 
+  const logoutMut = useMutation({ mutationFn: agentLogout });
+
   const hangupMut = useMutation({
     mutationFn: hangupCall,
     onSuccess: () => {
@@ -155,9 +237,21 @@ export default function AgentPage() {
     },
   });
 
-  const retry = useMutation({ mutationFn: retryInteraction });
+  const logout = async () => {
+    exitSignalSentRef.current = true;
+    try {
+      await logoutMut.mutateAsync({ reason: 'USER_LOGOUT' });
+    } catch {
+      // silent: local logout must continue even if backend cleanup fails
+    } finally {
+      localStorage.removeItem('token');
+      localStorage.removeItem('role');
+      sessionStorage.removeItem(sessionStorageKey);
+      navigate('/login', { replace: true });
+    }
+  };
 
-  const c: any = context.data;
+  const retry = useMutation({ mutationFn: retryInteraction });
 
 
   useEffect(() => {
@@ -181,11 +275,176 @@ export default function AgentPage() {
     return () => clearInterval(timer);
   }, [dialingBanner, qc]);
 
+  useEffect(() => {
+    lastKnownStatusRef.current = String(
+      c?.runtime?.agentStatus || active.data?.lead?.agentStatus || status.data?.status || ''
+    ).toUpperCase();
+  }, [c?.runtime?.agentStatus, active.data?.lead?.agentStatus, status.data?.status]);
+
+  useEffect(() => {
+    if (!localStorage.getItem('token')) {
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || heartbeatInFlightRef.current) {
+        return;
+      }
+      heartbeatInFlightRef.current = true;
+      try {
+        await agentSessionHeartbeat({
+          sessionId: browserSessionIdRef.current,
+          lastKnownVicidialStatus: lastKnownStatusRef.current,
+        });
+      } catch {
+        // silent: next interval retries
+      } finally {
+        heartbeatInFlightRef.current = false;
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, heartbeatIntervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    const notifyBrowserExit = () => {
+      if (exitSignalSentRef.current) {
+        return;
+      }
+      exitSignalSentRef.current = true;
+      const query = new URLSearchParams({
+        sessionId: browserSessionIdRef.current,
+        agentUser: profile.data?.agentUser || '',
+        reason: 'BROWSER_EXIT',
+      }).toString();
+      const endpoint = `${backendBaseUrl}/api/agent/session/browser-exit?${query}`;
+      const payload = JSON.stringify({
+        sessionId: browserSessionIdRef.current,
+        agentUser: profile.data?.agentUser,
+        reason: 'BROWSER_EXIT',
+      });
+      let delivered = false;
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+          delivered = navigator.sendBeacon(endpoint);
+        }
+      } catch {
+        delivered = false;
+      }
+      if (!delivered) {
+        const token = localStorage.getItem('token');
+        fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {
+          // best effort
+        });
+      }
+    };
+
+    window.addEventListener('pagehide', notifyBrowserExit);
+    window.addEventListener('beforeunload', notifyBrowserExit);
+    return () => {
+      window.removeEventListener('pagehide', notifyBrowserExit);
+      window.removeEventListener('beforeunload', notifyBrowserExit);
+    };
+  }, [backendBaseUrl, profile.data?.agentUser]);
+
+  useEffect(() => {
+    if (!isManual2ByCampaign) {
+      hydratedManual2PhoneRef.current = '';
+      return;
+    }
+    if (!normalizedRuntimeLeadPhone) {
+      hydratedManual2PhoneRef.current = '';
+      return;
+    }
+    if (hydratedManual2PhoneRef.current !== normalizedRuntimeLeadPhone) {
+      hydratedManual2PhoneRef.current = normalizedRuntimeLeadPhone;
+      setManual2Form({
+        nombres: '',
+        apellidos: '',
+        documento: '',
+        origen: 'MANUAL2',
+        comentario: '',
+        subtipificacion: '',
+      });
+    }
+  }, [isManual2ByCampaign, normalizedRuntimeLeadPhone]);
+
+  useEffect(() => {
+    if (!isManual2ByCampaign || !manual2ContactQuery.data?.found || !manual2ContactQuery.data?.contacto) {
+      return;
+    }
+    const contacto = manual2ContactQuery.data.contacto;
+    setManual2Form((prev) => ({
+      ...prev,
+      nombres: prev.nombres || contacto.nombres || '',
+      apellidos: prev.apellidos || contacto.apellidos || '',
+      documento: prev.documento || contacto.documento || '',
+      origen: prev.origen || contacto.origen || 'MANUAL2',
+    }));
+  }, [isManual2ByCampaign, manual2ContactQuery.data]);
+
   const phoneConnected = Boolean(status.data?.phoneConnected);
   const campaignConnected = Boolean(status.data?.campaign);
   const canType = phoneConnected && campaignConnected;
   const runtimeAgentStatus = String(c?.runtime?.agentStatus || active.data?.lead?.agentStatus || '').toUpperCase();
+  const runtimeClassification = String(c?.runtime?.classification || active.data?.details?.classification || '').toUpperCase();
   const runtimeCallId = c?.runtime?.callId || active.data?.lead?.callId || c?.lead?.callId || manualDialMut.data?.callId || manualNext.data?.callId;
+  const runtimeLeadId = c?.runtime?.leadId || active.data?.lead?.leadId || c?.lead?.leadId || leadId;
+  const runtimeUniqueId = c?.runtime?.uniqueId || active.data?.lead?.uniqueId || c?.lead?.uniqueId;
+  const runtimeChannel = c?.runtime?.channel || active.data?.lead?.channel || c?.lead?.channel;
+  const dialingInProgress = active.data?.code === 'VICIDIAL_DIALING' || dialingBanner;
+  const hasNoLeadSignal = active.data?.code === 'VICIDIAL_NO_ACTIVE_LEAD'
+    || runtimeAgentStatus === 'READY'
+    || runtimeAgentStatus === 'PAUSED'
+    || runtimeClassification === 'READY'
+    || runtimeClassification === 'AGENT_PAUSED'
+    || runtimeClassification === 'NO_ACTIVE_LEAD'
+    || runtimeClassification === 'NO_ACTIVE_CALL';
+  const hasStrongCallEvidence = Boolean(runtimeUniqueId || runtimeChannel);
+  const hasWeakCallEvidence = Boolean(runtimeCallId || runtimeLeadId);
+  const incallWithEvidence = runtimeAgentStatus === 'INCALL'
+    && (hasStrongCallEvidence || (hasWeakCallEvidence && !hasNoLeadSignal));
+  const callStillActive = dialingInProgress || incallWithEvidence;
+  const canFinalizeDisposition = canType && Boolean(dispo) && !callStillActive;
+  const currentLeadPhone = c?.lead?.phoneNumber || active.data?.lead?.phoneNumber || manualNumber || '';
+  const currentLeadDni = c?.lead?.dni || active.data?.lead?.dni || '';
+  const currentLeadCampaign = c?.lead?.campaign || status.data?.campaign || campaign || '';
+  const isManual2Campaign = currentLeadCampaign.toUpperCase() === 'MANUAL2';
+  const manual2DispoItems = (manual2DispositionsQuery.data?.items || []).map((item:any) => ({
+    status: String(item?.status || ''),
+    label: String(item?.label || item?.status || ''),
+  })).filter((item:{status:string;label:string}) => Boolean(item.status));
+  const fallbackDispoItems = (c?.dispoOptions || []).map((value:string) => ({ status: value, label: value }));
+  const dispoItems: Array<{status:string;label:string}> = isManual2Campaign
+    ? (manual2DispoItems.length ? manual2DispoItems : fallbackDispoItems)
+    : fallbackDispoItems;
+  const subtipItems: Array<{codigo:string;nombre:string}> = (manual2SubtipificacionesQuery.data?.items || [])
+    .map((item:any) => ({
+      codigo: String(item?.codigo || ''),
+      nombre: String(item?.nombre || item?.codigo || ''),
+    }))
+    .filter((item:{codigo:string;nombre:string}) => Boolean(item.codigo));
+  useEffect(() => {
+    if (!isManual2Campaign || !manual2Form.subtipificacion) {
+      return;
+    }
+    if (!subtipItems.some((item) => item.codigo === manual2Form.subtipificacion)) {
+      setManual2Form((prev) => ({ ...prev, subtipificacion: '' }));
+    }
+  }, [isManual2Campaign, manual2Form.subtipificacion, subtipItems]);
   const canHangup = campaignConnected && (runtimeAgentStatus === 'INCALL' || Boolean(runtimeCallId));
   const availableCampaigns = campaignsQuery.data?.campaigns || [];
 
@@ -370,6 +629,75 @@ export default function AgentPage() {
               <pre>{JSON.stringify(c?.customer, null, 2)}</pre>
             </Box>
 
+            {isManual2Campaign && (
+              <Stack gap={1} sx={{ p: 1.5, borderRadius: 2, bgcolor: 'grey.100' }}>
+                <Typography variant='subtitle2' fontWeight={700}>Formulario Manual2</Typography>
+                {normalizedRuntimeLeadPhone ? (
+                  <Alert severity={manual2ContactQuery.data?.found ? 'success' : 'info'}>
+                    {manual2ContactQuery.data?.found
+                      ? 'Telefono encontrado en BD del sistema. Puedes actualizar datos y guardar gestion.'
+                      : 'Telefono no registrado. Completa datos y se creara contacto/referido al guardar.'}
+                  </Alert>
+                ) : (
+                  <Alert severity='info'>Aun no hay telefono de llamada para precargar formulario Manual2.</Alert>
+                )}
+                {manual2ContactQuery.data?.totalGestiones > 0 && (
+                  <Alert severity='info'>
+                    Historial detectado para este telefono: {manual2ContactQuery.data?.totalGestiones} gestiones.
+                  </Alert>
+                )}
+                <Stack direction={{ xs: 'column', md: 'row' }} gap={1}>
+                  <TextField
+                    label='Nombres'
+                    value={manual2Form.nombres}
+                    onChange={(e) => setManual2Form((prev) => ({ ...prev, nombres: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    label='Apellidos'
+                    value={manual2Form.apellidos}
+                    onChange={(e) => setManual2Form((prev) => ({ ...prev, apellidos: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    label='Documento'
+                    value={manual2Form.documento}
+                    onChange={(e) => setManual2Form((prev) => ({ ...prev, documento: e.target.value }))}
+                    fullWidth
+                  />
+                </Stack>
+                <TextField
+                  label='Comentario formulario'
+                  multiline
+                  minRows={2}
+                  value={manual2Form.comentario}
+                  onChange={(e) => setManual2Form((prev) => ({ ...prev, comentario: e.target.value }))}
+                />
+                <Stack direction={{ xs: 'column', md: 'row' }} gap={1}>
+                  <TextField
+                    label='Origen'
+                    value={manual2Form.origen}
+                    onChange={(e) => setManual2Form((prev) => ({ ...prev, origen: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    select
+                    label='Subtipificacion'
+                    value={manual2Form.subtipificacion}
+                    onChange={(e) => setManual2Form((prev) => ({ ...prev, subtipificacion: e.target.value }))}
+                    fullWidth
+                  >
+                    <MenuItem value=''>Sin subtipificacion</MenuItem>
+                    {subtipItems.map((item) => (
+                      <MenuItem key={item.codigo} value={item.codigo}>
+                        {item.nombre}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Stack>
+              </Stack>
+            )}
+
             <TextField
               select
               label='Disposición'
@@ -377,9 +705,9 @@ export default function AgentPage() {
               onChange={(e) => setDispo(e.target.value)}
               disabled={!canType}
             >
-              {(c?.dispoOptions || []).map((d: string) => (
-                <MenuItem key={d} value={d}>
-                  {d}
+              {dispoItems.map((d) => (
+                <MenuItem key={d.status} value={d.status}>
+                  {d.label}
                 </MenuItem>
               ))}
             </TextField>
@@ -395,22 +723,77 @@ export default function AgentPage() {
 
             <Button
               variant='contained'
-              disabled={!canType || !dispo}
-              onClick={() =>
+              disabled={!canFinalizeDisposition || save.isPending || saveManual2GestionMut.isPending}
+              onClick={() => {
+                if (isManual2Campaign) {
+                  const recordingFromHangup = String(hangupMut.data?.details?.recordingFilename || '');
+                  const fallbackRecordingFromRuntime = String(c?.runtime?.details?.recordingFilename || '');
+                  const resolvedRecording = recordingFromHangup || fallbackRecordingFromRuntime;
+                  saveManual2GestionMut.mutate({
+                    campaignId: currentLeadCampaign || 'Manual2',
+                    phoneNumber: normalizedRuntimeLeadPhone || currentLeadPhone,
+                    nombres: manual2Form.nombres,
+                    apellidos: manual2Form.apellidos,
+                    documento: manual2Form.documento,
+                    origen: manual2Form.origen,
+                    comentario: manual2Form.comentario,
+                    tipificacion: dispo,
+                    disposicion: dispo,
+                    subtipificacion: manual2Form.subtipificacion || null,
+                    observaciones: notes,
+                    modoLlamada: mode,
+                    leadId: leadId || null,
+                    callId: runtimeCallId || null,
+                    uniqueId: c?.runtime?.uniqueId || c?.lead?.uniqueId || null,
+                    nombreAudio: resolvedRecording || null,
+                    duracion: Number(c?.runtime?.details?.liveCallSeconds || 0) || null,
+                  });
+                  return;
+                }
                 save.mutate({
                   mode,
                   leadId,
-                  phoneNumber: c?.lead?.phoneNumber || '',
-                  campaign: c?.lead?.campaign || status.data?.campaign || '',
-                  dni: c?.lead?.dni || '',
+                  phoneNumber: currentLeadPhone,
+                  campaign: currentLeadCampaign,
+                  dni: currentLeadDni,
                   dispo,
                   notes,
                   extra: {},
-                })
-              }
+                });
+              }}
             >
               Guardar gestión
             </Button>
+
+            {callStillActive && canType && (
+              <Alert severity='info'>
+                La tipificación final se habilita cuando la llamada termine. Puedes seguir editando disposición y notas como borrador.
+              </Alert>
+            )}
+
+            {save.isError && (save.error as any)?.response?.data?.code === 'VICIDIAL_CALL_STILL_ACTIVE' && (
+              <Alert severity='warning'>
+                La llamada sigue activa. Cuelga primero para confirmar la tipificación final.
+              </Alert>
+            )}
+
+            {saveManual2GestionMut.isError && (saveManual2GestionMut.error as any)?.response?.data?.code === 'VICIDIAL_CALL_STILL_ACTIVE' && (
+              <Alert severity='warning'>
+                La llamada sigue activa. Finaliza la llamada antes de guardar la gestiÃ³n Manual2.
+              </Alert>
+            )}
+
+            {saveManual2GestionMut.data?.ok && (
+              <Alert severity='success'>
+                GestiÃ³n Manual2 guardada correctamente en la BD del sistema.
+              </Alert>
+            )}
+
+            {saveManual2GestionMut.isError && (
+              <Alert severity='error'>
+                No se pudo guardar la gestiÃ³n final de Manual2.
+              </Alert>
+            )}
 
             {save.data?.syncStatus !== 'SYNCED' && save.data?.id && (
               <Button onClick={() => retry.mutate(save.data.id)}>Reintentar</Button>
@@ -525,8 +908,17 @@ export default function AgentPage() {
                 disabled={!canHangup || hangupMut.isPending}
                 onClick={() =>
                   hangupMut.mutate({
-                    campaignId: status.data?.campaign || campaign || '',
-                    dispo: dispo || 'N',
+                    campaignId: currentLeadCampaign,
+                    dispo: isManual2Campaign ? undefined : (dispo || 'N'),
+                    mode,
+                    leadId,
+                    phoneNumber: currentLeadPhone,
+                    dni: currentLeadDni,
+                    notes,
+                    extra: {
+                      source: 'agent-ui-hangup',
+                      skipCrmInteractionSave: true,
+                    },
                   })
                 }
               >

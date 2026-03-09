@@ -1,0 +1,1 @@
+{"root":["./src/main.tsx","./src/vite-env.d.ts","./src/api/client.ts","./src/api/sdk.ts","./src/app/app.tsx","./src/components/ui/authstepper.tsx","./src/components/ui/vicicard.tsx","./src/pages/adminpage.tsx","./src/pages/adminrealtimepage.tsx","./src/pages/agentpage.tsx","./src/pages/loginpage.tsx","./src/types/openapi.ts"],"version":"5.9.3"}

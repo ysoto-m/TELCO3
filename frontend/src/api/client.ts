@@ -1,6 +1,10 @@
 import axios from 'axios';
+
+const env = (import.meta as any).env || {};
+const resolvedBaseUrl = env.VITE_BACKEND_BASE_URL || env.VITE_API_BASE_URL || 'http://localhost:8080';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_BASE_URL || 'http://localhost:8080',
+  baseURL: resolvedBaseUrl,
   withCredentials: true,
 });
 api.interceptors.request.use((c)=>{
