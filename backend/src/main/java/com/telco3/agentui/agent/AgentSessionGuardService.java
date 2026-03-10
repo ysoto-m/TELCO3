@@ -1,8 +1,8 @@
 package com.telco3.agentui.agent;
 
-import com.telco3.agentui.domain.AgentVicidialCredentialRepository;
-import com.telco3.agentui.domain.Entities;
 import com.telco3.agentui.domain.UserRepository;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -35,7 +35,7 @@ public class AgentSessionGuardService {
     }
   }
 
-  public Entities.AgentVicidialCredentialEntity requireConnectedSession(String agentUser) {
+  public AgentVicidialCredentialEntity requireConnectedSession(String agentUser) {
     var session = agentVicidialCredentialRepository.findByAppUsername(agentUser)
         .orElseThrow(() -> new VicidialServiceException(
             HttpStatus.CONFLICT,

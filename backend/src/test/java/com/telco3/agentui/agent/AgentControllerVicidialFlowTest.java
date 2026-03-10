@@ -1,10 +1,14 @@
 package com.telco3.agentui.agent;
 
-import com.telco3.agentui.domain.*;
-import com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity;
 import com.telco3.agentui.domain.Role;
-import com.telco3.agentui.domain.Entities.UserEntity;
+import com.telco3.agentui.domain.UserEntity;
+import com.telco3.agentui.domain.UserRepository;
+import com.telco3.agentui.legacy.CustomerPhoneRepository;
+import com.telco3.agentui.legacy.CustomerRepository;
+import com.telco3.agentui.legacy.InteractionRepository;
 import com.telco3.agentui.vicidial.*;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.env.MockEnvironment;

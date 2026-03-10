@@ -66,6 +66,7 @@ public class Manual2AdminController {
     return manual2Service.exportCsv(filter);
   }
 
+  @Deprecated(forRemoval = false, since = "1.3.0")
   @GetMapping("/historial")
   public Map<String, Object> historial(@RequestParam String phoneNumber) {
     return manual2Service.historyByTelefono(phoneNumber);

@@ -1,7 +1,7 @@
 package com.telco3.agentui.vicidial;
 
 import com.telco3.agentui.agent.VicidialCredentialService;
-import com.telco3.agentui.domain.Entities;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.env.MockEnvironment;
@@ -32,7 +32,7 @@ class VicidialServiceTest {
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
         new MockEnvironment(), mock(VicidialRuntimeDataSourceFactory.class));
 
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.agentUser = "agent1";
     var result = service.dialNextWithLeadRetry("agent1", session, "M123456789", "M123456789", null);
 
@@ -50,7 +50,7 @@ class VicidialServiceTest {
     when(credentialService.resolveAgentPass("agent1")).thenReturn(java.util.Optional.empty());
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(),
         credentialService, new MockEnvironment(), mock(VicidialRuntimeDataSourceFactory.class));
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.currentDialStatus = "DIALING";
     session.currentCallId = "M777";
 
@@ -71,7 +71,7 @@ class VicidialServiceTest {
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
         env, dataSourceFactory);
 
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.agentUser = "agent1";
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "MANUAL01";
@@ -126,7 +126,7 @@ class VicidialServiceTest {
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
         new MockEnvironment(), dataSourceFactory);
 
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.agentUser = "agent1";
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "MANUAL01";
@@ -175,7 +175,7 @@ class VicidialServiceTest {
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
         new MockEnvironment(), dataSourceFactory);
 
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.agentUser = "agent1";
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "MANUAL01";
@@ -226,7 +226,7 @@ class VicidialServiceTest {
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
         env, dataSourceFactory);
 
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.agentUser = "agent1";
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "MANUAL01";
@@ -277,7 +277,7 @@ class VicidialServiceTest {
     VicidialService service = new VicidialService(client, new VicidialDialResponseParser(), credentialService,
         env, dataSourceFactory);
 
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.agentUser = "agent1";
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "MANUAL01";
@@ -324,3 +324,4 @@ class VicidialServiceTest {
     verify(client).manualDialLogCall(eq("agent1"), anyMap(), eq("start"));
   }
 }
+

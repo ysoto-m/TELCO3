@@ -1,11 +1,15 @@
 package com.telco3.agentui.agent;
 
-import com.telco3.agentui.domain.*;
+import com.telco3.agentui.domain.UserRepository;
+import com.telco3.agentui.legacy.CustomerPhoneRepository;
+import com.telco3.agentui.legacy.CustomerRepository;
+import com.telco3.agentui.legacy.InteractionRepository;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialDialRequestBuilder;
 import com.telco3.agentui.vicidial.VicidialDialResponseParser;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialService;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -72,7 +76,7 @@ class AgentVicidialStatusControllerTest {
         .thenThrow(new VicidialServiceException(
             HttpStatus.SERVICE_UNAVAILABLE,
             "VICIDIAL_CONFIG_MISSING",
-            "VICIDIAL_BASE_URL no está configurado. Configure VICIDIAL_BASE_URL en variables de entorno (por ejemplo: http://172.17.248.220).",
+            "VICIDIAL_BASE_URL no estÃƒÂ¡ configurado. Configure VICIDIAL_BASE_URL en variables de entorno (por ejemplo: http://172.17.248.220).",
             "Revisar docker-compose/.env y printenv dentro del contenedor",
             null
         ));
@@ -123,7 +127,7 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void activeLeadWithoutConnectedSessionReturnsVicidialNotConnected() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
@@ -136,9 +140,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void activeLeadWithoutLeadReturnsNoActiveLeadBusinessPayload() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "IVR";
@@ -157,9 +161,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void activeLeadWhenDialingReturnsVicidialDialing() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "IVR";
@@ -177,7 +181,7 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void manualNextWithoutConnectedSessionReturnsVicidialNotConnected() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
@@ -192,9 +196,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void manualNextWhenAgentNotLoggedInRequiresRelogin() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "Manual";
@@ -236,9 +240,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void manualNextPermissionDeniedMapsInvalidSessionBusinessError() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "Manual";
@@ -280,9 +284,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void manualDialWithIncompleteSessionReturnsVicidialSessionIncomplete() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "Manual";
@@ -294,8 +298,8 @@ class AgentVicidialStatusControllerTest {
     when(vicidialDialRequestBuilder.buildManualDialPayload(org.mockito.ArgumentMatchers.eq("agent1"), org.mockito.ArgumentMatchers.eq("secret"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(new VicidialServiceException(HttpStatus.CONFLICT,
             "VICIDIAL_SESSION_INCOMPLETE",
-            "La sesión Vicidial está incompleta para marcación manual.",
-            "Vuelva a conectar campaña para refrescar session_name/server_ip/agent_log_id.",
+            "La sesiÃƒÂ³n Vicidial estÃƒÂ¡ incompleta para marcaciÃƒÂ³n manual.",
+            "Vuelva a conectar campaÃƒÂ±a para refrescar session_name/server_ip/agent_log_id.",
             null));
 
     mockMvc.perform(post("/api/agent/vicidial/dial/manual")
@@ -308,9 +312,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void manualDialNotLoggedInReturnsReloginRequired() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "Manual";
@@ -354,9 +358,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void manualDialPausedSignalDoesNotShortCircuitFlow() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "Manual";
@@ -403,9 +407,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void manualDialWhenAlreadyIncallReturnsAgentIncall() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "Manual";
@@ -441,9 +445,9 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void pollVicidialSessionExecutesUpdateSettingsAndCallbackCount() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
-    var session = new com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity();
+    var session = new com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity();
     session.connected = true;
     session.connectedPhoneLogin = "1001";
     session.connectedCampaign = "Manual";
@@ -470,7 +474,7 @@ class AgentVicidialStatusControllerTest {
   @Test
   @WithMockUser(username = "agent1")
   void contextWithoutConnectedSessionReturnsVicidialNotConnected() throws Exception {
-    var user = new com.telco3.agentui.domain.Entities.UserEntity();
+    var user = new com.telco3.agentui.domain.UserEntity();
     user.username = "agent1";
     when(userRepository.findByUsernameAndActiveTrue("agent1")).thenReturn(Optional.of(user));
     when(agentVicidialCredentialRepository.findByAppUsername("agent1")).thenReturn(Optional.empty());
@@ -504,3 +508,4 @@ class AgentVicidialStatusControllerTest {
   }
 
 }
+

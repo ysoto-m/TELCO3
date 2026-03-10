@@ -1,8 +1,8 @@
 package com.telco3.agentui.agent;
 
-import com.telco3.agentui.domain.AgentVicidialCredentialRepository;
-import com.telco3.agentui.domain.Entities.AgentVicidialCredentialEntity;
 import com.telco3.agentui.domain.UserRepository;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

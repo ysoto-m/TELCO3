@@ -1,3 +1,0 @@
-# Primary configuration has been consolidated into `application.properties`.
-# This file is intentionally kept minimal for backward compatibility with
-# tooling/scripts that still expect `application.yml` to exist.

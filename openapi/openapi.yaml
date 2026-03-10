@@ -570,6 +570,60 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/agent/validacion-claro-peru/disposiciones:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: campaignId, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/agent/validacion-claro-peru/subtipificaciones:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: campaignId, in: query, required: false, schema: { type: string } }
+        - { name: tipificacion, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/agent/validacion-claro-peru/formulario:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: documento, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/agent/validacion-claro-peru/gestion:
+    post:
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /api/admin/users/{id}/agent-pass:
     put:
       security: [{ bearerAuth: [] }]
@@ -883,6 +937,46 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /api/admin/validacion-claro-peru/reporte:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: campana, in: query, required: false, schema: { type: string } }
+        - { name: agente, in: query, required: false, schema: { type: string } }
+        - { name: tipificacion, in: query, required: false, schema: { type: string } }
+        - { name: disposicion, in: query, required: false, schema: { type: string } }
+        - { name: subtipificacion, in: query, required: false, schema: { type: string } }
+        - { name: telefono, in: query, required: false, schema: { type: string } }
+        - { name: documento, in: query, required: false, schema: { type: string } }
+        - { name: encuesta, in: query, required: false, schema: { type: string } }
+        - { name: page, in: query, required: false, schema: { type: integer } }
+        - { name: size, in: query, required: false, schema: { type: integer } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /api/admin/validacion-claro-peru/reporte.csv:
+    get:
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: campana, in: query, required: false, schema: { type: string } }
+        - { name: agente, in: query, required: false, schema: { type: string } }
+        - { name: tipificacion, in: query, required: false, schema: { type: string } }
+        - { name: disposicion, in: query, required: false, schema: { type: string } }
+        - { name: subtipificacion, in: query, required: false, schema: { type: string } }
+        - { name: telefono, in: query, required: false, schema: { type: string } }
+        - { name: documento, in: query, required: false, schema: { type: string } }
+        - { name: encuesta, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: csv
   /api/admin/manual2/subtipificaciones:
     get:
       security: [{ bearerAuth: [] }]

@@ -145,7 +145,7 @@ public class VicidialClient {
     if (root instanceof TimeoutException) {
       return new VicidialServiceException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
           "VICIDIAL_UNREACHABLE",
-          "Vicidial no respondió dentro del tiempo esperado.",
+          "Vicidial no respondiÃ³ dentro del tiempo esperado.",
           "Verifique conectividad a VICIDIAL_BASE_URL y estado del servidor AGC/API.",
           Map.of("cause", "TimeoutException"));
     }
@@ -537,7 +537,7 @@ public class VicidialClient {
     if (!StringUtils.hasText(s.baseUrl())) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CONFIG_MISSING",
-          "No hay baseUrl de Vicidial configurada para conectar campaña.");
+          "No hay baseUrl de Vicidial configurada para conectar campaÃ±a.");
     }
 
     var params = buildCampaignConnectParams(agentUser, agentPass, phoneLogin, phonePass, campaignId, browserWidth, browserHeight);
@@ -548,7 +548,7 @@ public class VicidialClient {
     if (result.statusCode() >= 400) {
       throw new VicidialServiceException(HttpStatus.BAD_GATEWAY,
           "VICIDIAL_HTTP_ERROR",
-          "Vicidial devolvió un estado HTTP de error al conectar campaña.",
+          "Vicidial devolviÃ³ un estado HTTP de error al conectar campaÃ±a.",
           "Verifique endpoint /agc/vicidial.php y disponibilidad del servidor Vicidial.",
           Map.of("status", result.statusCode()));
     }
@@ -575,50 +575,50 @@ public class VicidialClient {
     if (outcome == ConnectOutcome.INVALID_CREDENTIALS) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_INVALID_CREDENTIALS",
-          "Vicidial rechazó las credenciales del agente para conectar campaña.",
+          "Vicidial rechazÃ³ las credenciales del agente para conectar campaÃ±a.",
           "Revise agent_user/agent_pass en Vicidial.",
           details);
     }
     if (outcome == ConnectOutcome.PHONE_INVALID) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_PHONE_INVALID",
-          "Vicidial rechazó el anexo o clave de teléfono del agente.",
+          "Vicidial rechazÃ³ el anexo o clave de telÃ©fono del agente.",
           "Revise phone_login/phone_pass y estado del phone en Vicidial.",
           details);
     }
     if (outcome == ConnectOutcome.CAMPAIGN_NOT_ASSIGNED) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_NOT_ASSIGNED",
-          "La campaña no está asignada o disponible para el agente en Vicidial.",
-          "Valide que el agente tenga acceso a la campaña y que esté habilitada.",
+          "La campaÃ±a no estÃ¡ asignada o disponible para el agente en Vicidial.",
+          "Valide que el agente tenga acceso a la campaÃ±a y que estÃ© habilitada.",
           details);
     }
     if (outcome == ConnectOutcome.NO_LEADS) {
       throw new VicidialServiceException(HttpStatus.CONFLICT,
           "VICIDIAL_NO_LEADS",
-          "La campaña no tiene leads disponibles (hopper vacío).",
-          "Cargue base/leads en la campaña o verifique listas/filtros activos en Vicidial.",
+          "La campaÃ±a no tiene leads disponibles (hopper vacÃ­o).",
+          "Cargue base/leads en la campaÃ±a o verifique listas/filtros activos en Vicidial.",
           Map.of("campaignId", campaignId, "httpStatus", result.statusCode()));
     }
     if (outcome == ConnectOutcome.GENERIC_ERROR) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
-          "Vicidial devolvió un error al conectar campaña.",
-          "Revise permisos del user en Vicidial, campaña asignada y phone_login válido.",
+          "Vicidial devolviÃ³ un error al conectar campaÃ±a.",
+          "Revise permisos del user en Vicidial, campaÃ±a asignada y phone_login vÃ¡lido.",
           details);
     }
     if (outcome == ConnectOutcome.STILL_LOGIN_PAGE) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
-          "No fue posible confirmar conexión de campaña en Vicidial.",
-          "Vicidial devolvió pantalla de login/relogin.",
+          "No fue posible confirmar conexiÃ³n de campaÃ±a en Vicidial.",
+          "Vicidial devolviÃ³ pantalla de login/relogin.",
           details);
     }
     if (outcome != ConnectOutcome.SUCCESS) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST,
           "VICIDIAL_CAMPAIGN_CONNECT_FAILED",
-          "No fue posible confirmar conexión de campaña en Vicidial.",
-          "Revise permisos del user en Vicidial, campaña asignada, phone_login válido y respuesta HTML AGC.",
+          "No fue posible confirmar conexiÃ³n de campaÃ±a en Vicidial.",
+          "Revise permisos del user en Vicidial, campaÃ±a asignada, phone_login vÃ¡lido y respuesta HTML AGC.",
           details);
     }
     return result;
@@ -805,13 +805,13 @@ public class VicidialClient {
     } catch (ConnectTimeoutException ex) {
       throw new VicidialServiceException(HttpStatus.SERVICE_UNAVAILABLE,
           "VICIDIAL_UNREACHABLE",
-          "Vicidial no respondió dentro del tiempo esperado.",
+          "Vicidial no respondiÃ³ dentro del tiempo esperado.",
           "Verifique conectividad a VICIDIAL_BASE_URL y estado del servidor.",
           Map.of("cause", ex.getClass().getSimpleName()));
     } catch (SocketTimeoutException ex) {
       throw new VicidialServiceException(HttpStatus.SERVICE_UNAVAILABLE,
           "VICIDIAL_UNREACHABLE",
-          "Vicidial no respondió dentro del tiempo esperado.",
+          "Vicidial no respondiÃ³ dentro del tiempo esperado.",
           "Verifique conectividad a VICIDIAL_BASE_URL y estado del servidor.",
           Map.of("cause", ex.getClass().getSimpleName()));
     } catch (ConnectException | java.net.UnknownHostException ex) {
@@ -930,7 +930,7 @@ public class VicidialClient {
     try {
       return new URI(baseUrl + path);
     } catch (URISyntaxException ex) {
-      throw new IllegalArgumentException("VICIDIAL_BASE_URL inválido: " + baseUrl, ex);
+      throw new IllegalArgumentException("VICIDIAL_BASE_URL invÃ¡lido: " + baseUrl, ex);
     }
   }
 

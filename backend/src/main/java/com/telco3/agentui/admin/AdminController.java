@@ -1,11 +1,10 @@
 package com.telco3.agentui.admin;
 
 import com.telco3.agentui.agent.VicidialCredentialService;
-import com.telco3.agentui.domain.Entities;
 import com.telco3.agentui.domain.Role;
-import com.telco3.agentui.domain.InteractionRepository;
+import com.telco3.agentui.domain.UserEntity;
 import com.telco3.agentui.domain.UserRepository;
-import com.telco3.agentui.domain.Entities.UserEntity;
+import com.telco3.agentui.legacy.InteractionRepository;
 import com.telco3.agentui.settings.SettingsController;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialRealtimeQueryService;
@@ -180,6 +179,7 @@ public class AdminController {
     return Map.of("ok", true, "id", u.id);
   }
 
+  @Deprecated(forRemoval = false, since = "1.3.0")
   @PutMapping("/users/{id}")
   Map<String, Object> updateUser(@PathVariable Long id, @RequestBody UserUpsertReq req) {
     UserEntity u = users.findById(id).orElseThrow();

@@ -1,7 +1,9 @@
 package com.telco3.agentui.importer;
 
-import com.telco3.agentui.domain.Entities.*;
-import com.telco3.agentui.domain.*;
+import com.telco3.agentui.legacy.CustomerEntity;
+import com.telco3.agentui.legacy.CustomerPhoneEntity;
+import com.telco3.agentui.legacy.CustomerPhoneRepository;
+import com.telco3.agentui.legacy.CustomerRepository;
 import com.telco3.agentui.vicidial.VicidialClient;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;

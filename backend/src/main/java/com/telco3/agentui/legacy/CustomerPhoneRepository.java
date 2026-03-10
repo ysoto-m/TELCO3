@@ -1,5 +1,5 @@
-package com.telco3.agentui.domain;
-import com.telco3.agentui.domain.Entities.CustomerPhoneEntity;
+package com.telco3.agentui.legacy;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.*;
 /**

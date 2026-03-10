@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestController
@@ -34,11 +35,11 @@ public class Manual2AgentController {
       Authentication auth
   ) {
     requireAuth(auth);
-    return Map.of(
-        "items", manual2Service.listSubtipificaciones(campaignId, tipificacion),
-        "campaignId", campaignId == null ? "Manual2" : campaignId,
-        "tipificacion", tipificacion
-    );
+    Map<String, Object> response = new LinkedHashMap<>();
+    response.put("items", manual2Service.listSubtipificaciones(campaignId, tipificacion));
+    response.put("campaignId", campaignId == null ? "Manual2" : campaignId);
+    response.put("tipificacion", tipificacion);
+    return response;
   }
 
   @GetMapping("/contacto")
@@ -47,6 +48,7 @@ public class Manual2AgentController {
     return manual2Service.lookupContacto(phoneNumber);
   }
 
+  @Deprecated(forRemoval = false, since = "1.3.0")
   @PostMapping("/formulario")
   public Map<String, Object> guardarFormulario(@RequestBody Manual2Service.SaveFormularioRequest request, Authentication auth) {
     return manual2Service.saveFormulario(requireAuth(auth), request);
@@ -57,6 +59,7 @@ public class Manual2AgentController {
     return manual2Service.saveGestionFinal(requireAuth(auth), request);
   }
 
+  @Deprecated(forRemoval = false, since = "1.3.0")
   @GetMapping("/historial")
   public Map<String, Object> historial(@RequestParam String phoneNumber, Authentication auth) {
     requireAuth(auth);

@@ -1,4 +1,4 @@
-package com.telco3.agentui.domain;
+package com.telco3.agentui.legacy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,7 +10,8 @@ import java.util.List;
 
 /**
  * Legacy repository (english naming) kept for compatibility.
- * New campaign features should use repositories around {@link InteraccionEntity}.
+ * New campaign features should use repositories around
+ * {@link com.telco3.agentui.domain.InteraccionEntity}.
  */
 @Deprecated(forRemoval = false, since = "1.3.0")
 public interface InteractionRepository extends JpaRepository<InteractionEntity,Long> {

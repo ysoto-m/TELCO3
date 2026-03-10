@@ -21,6 +21,10 @@ export const manual2Dispositions = (campaignId?:string)=>api.get('/api/agent/man
 export const manual2Subtipificaciones = (campaignId?:string, tipificacion?:string)=>api.get('/api/agent/manual2/subtipificaciones',{params:{campaignId, tipificacion}}).then(r=>r.data);
 export const manual2LookupContact = (phoneNumber:string)=>api.get('/api/agent/manual2/contacto',{params:{phoneNumber}}).then(r=>r.data);
 export const manual2SaveGestion = (payload:any)=>api.post('/api/agent/manual2/gestion',payload).then(r=>r.data);
+export const validacionClaroPeruDispositions = (campaignId?:string)=>api.get('/api/agent/validacion-claro-peru/disposiciones',{params:{campaignId}}).then(r=>r.data);
+export const validacionClaroPeruSubtipificaciones = (campaignId?:string, tipificacion?:string)=>api.get('/api/agent/validacion-claro-peru/subtipificaciones',{params:{campaignId, tipificacion}}).then(r=>r.data);
+export const validacionClaroPeruLookupFormulario = (documento:string)=>api.get('/api/agent/validacion-claro-peru/formulario',{params:{documento}}).then(r=>r.data);
+export const validacionClaroPeruSaveGestion = (payload:any)=>api.post('/api/agent/validacion-claro-peru/gestion',payload).then(r=>r.data);
 export const hangupCall = (
   payload?: {
     campaignId?: string;
@@ -55,6 +59,11 @@ export const adminManual2Report = (params:any)=>api.get('/api/admin/manual2/repo
 export const adminManual2ExportCsvUrl = (params:any)=> {
   const query = new URLSearchParams(params).toString();
   return `${api.defaults.baseURL}/api/admin/manual2/reporte.csv?${query}`;
+};
+export const adminValidacionClaroPeruReport = (params:any)=>api.get('/api/admin/validacion-claro-peru/reporte',{params}).then(r=>r.data);
+export const adminValidacionClaroPeruExportCsvUrl = (params:any)=> {
+  const query = new URLSearchParams(params).toString();
+  return `${api.defaults.baseURL}/api/admin/validacion-claro-peru/reporte.csv?${query}`;
 };
 export const adminManual2Subtipificaciones = (campana?:string)=>api.get('/api/admin/manual2/subtipificaciones',{params:{campana}}).then(r=>r.data);
 export const adminManual2SaveSubtipificacion = (payload:any)=>api.post('/api/admin/manual2/subtipificaciones',payload).then(r=>r.data);

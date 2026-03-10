@@ -1,13 +1,13 @@
 package com.telco3.agentui.campaign.core;
 
 import com.telco3.agentui.agent.VicidialCredentialService;
-import com.telco3.agentui.domain.AgentVicidialCredentialRepository;
 import com.telco3.agentui.domain.ContactoEntity;
 import com.telco3.agentui.domain.ContactoRepository;
 import com.telco3.agentui.domain.InteraccionEntity;
 import com.telco3.agentui.domain.InteraccionRepository;
 import com.telco3.agentui.vicidial.VicidialService;
 import com.telco3.agentui.vicidial.VicidialServiceException;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

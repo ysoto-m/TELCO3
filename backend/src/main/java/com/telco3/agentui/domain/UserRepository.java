@@ -1,5 +1,4 @@
 package com.telco3.agentui.domain;
-import com.telco3.agentui.domain.Entities.UserEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;

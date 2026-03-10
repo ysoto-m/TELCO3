@@ -31,6 +31,10 @@ import {
   manual2SaveGestion,
   manual2Subtipificaciones,
   manualDial,
+  validacionClaroPeruDispositions,
+  validacionClaroPeruLookupFormulario,
+  validacionClaroPeruSaveGestion,
+  validacionClaroPeruSubtipificaciones,
   getVicidialCampaigns,
   getVicidialStatus,
   getCampaignDetails,
@@ -44,6 +48,7 @@ import AuthStepper from '../components/ui/AuthStepper';
 import ViciCard from '../components/ui/ViciCard';
 
 export default function AgentPage() {
+  const normalizeCampaignKey = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '');
   const navigate = useNavigate();
   const qc = useQueryClient();
   const defaultPhoneCode = ((import.meta as any).env?.VITE_DEFAULT_PHONE_CODE || '1').toString();
@@ -57,7 +62,16 @@ export default function AgentPage() {
     comentario: '',
     subtipificacion: '',
   });
+  const [validacionClaroPeruForm, setValidacionClaroPeruForm] = useState({
+    nombres: '',
+    apellidos: '',
+    documento: '',
+    comentario: '',
+    encuesta: '',
+    subtipificacion: '',
+  });
   const hydratedManual2PhoneRef = useRef('');
+  const hydratedValidacionLeadRef = useRef('');
   const [phoneLogin, setPhoneLogin] = useState('');
   const [campaign, setCampaign] = useState('');
   const [remember, setRemember] = useState(true);
@@ -108,22 +122,25 @@ export default function AgentPage() {
 
   const mode = (campaignDetails.data?.campaign?.mode || context.data?.mode || 'predictive') as 'predictive' | 'manual';
   const isManualFlow = mode === 'manual';
-  const runtimeCampaignForManual2 = status.data?.campaign || campaign || '';
-  const isManual2ByCampaign = runtimeCampaignForManual2.toUpperCase() === 'MANUAL2';
+  const runtimeCampaignForForm = status.data?.campaign || campaign || '';
+  const runtimeCampaignKey = normalizeCampaignKey(runtimeCampaignForForm);
+  const isManual2ByCampaign = runtimeCampaignKey === 'MANUAL2';
+  const isValidacionClaroPeruByCampaign = runtimeCampaignKey === 'VALIDACIONCLAROPERU';
   const runtimeLeadPhone = c?.lead?.phoneNumber || active.data?.lead?.phoneNumber || manualNumber || '';
   const normalizedRuntimeLeadPhone = runtimeLeadPhone.replace(/[^0-9]/g, '');
+  const runtimeLeadDocument = String(c?.lead?.dni || active.data?.lead?.dni || '').trim();
 
   const manual2DispositionsQuery = useQuery({
-    queryKey: ['manual2-dispositions', runtimeCampaignForManual2],
-    queryFn: () => manual2Dispositions(runtimeCampaignForManual2 || 'Manual2'),
-    enabled: Boolean(runtimeCampaignForManual2) && isManual2ByCampaign,
+    queryKey: ['manual2-dispositions', runtimeCampaignForForm],
+    queryFn: () => manual2Dispositions(runtimeCampaignForForm || 'Manual2'),
+    enabled: Boolean(runtimeCampaignForForm) && isManual2ByCampaign,
     staleTime: 30000,
   });
 
   const manual2SubtipificacionesQuery = useQuery({
-    queryKey: ['manual2-subtipificaciones', runtimeCampaignForManual2, dispo],
-    queryFn: () => manual2Subtipificaciones(runtimeCampaignForManual2 || 'Manual2', dispo || undefined),
-    enabled: Boolean(runtimeCampaignForManual2) && isManual2ByCampaign,
+    queryKey: ['manual2-subtipificaciones', runtimeCampaignForForm, dispo],
+    queryFn: () => manual2Subtipificaciones(runtimeCampaignForForm || 'Manual2', dispo || undefined),
+    enabled: Boolean(runtimeCampaignForForm) && isManual2ByCampaign,
     staleTime: 30000,
   });
 
@@ -131,6 +148,27 @@ export default function AgentPage() {
     queryKey: ['manual2-contact', normalizedRuntimeLeadPhone],
     queryFn: () => manual2LookupContact(normalizedRuntimeLeadPhone),
     enabled: isManual2ByCampaign && normalizedRuntimeLeadPhone.length >= 6,
+  });
+
+  const validacionDispositionsQuery = useQuery({
+    queryKey: ['validacion-claro-peru-dispositions', runtimeCampaignForForm],
+    queryFn: () => validacionClaroPeruDispositions(runtimeCampaignForForm || 'ValidacionClaroPeru'),
+    enabled: Boolean(runtimeCampaignForForm) && isValidacionClaroPeruByCampaign,
+    staleTime: 30000,
+  });
+
+  const validacionSubtipificacionesQuery = useQuery({
+    queryKey: ['validacion-claro-peru-subtipificaciones', runtimeCampaignForForm, dispo],
+    queryFn: () => validacionClaroPeruSubtipificaciones(runtimeCampaignForForm || 'ValidacionClaroPeru', dispo || undefined),
+    enabled: Boolean(runtimeCampaignForForm) && isValidacionClaroPeruByCampaign,
+    staleTime: 30000,
+  });
+
+  const validacionLookupDocumento = (validacionClaroPeruForm.documento || runtimeLeadDocument).trim();
+  const validacionFormularioQuery = useQuery({
+    queryKey: ['validacion-claro-peru-formulario', validacionLookupDocumento],
+    queryFn: () => validacionClaroPeruLookupFormulario(validacionLookupDocumento),
+    enabled: isValidacionClaroPeruByCampaign && validacionLookupDocumento.length >= 4,
   });
 
   const connectPhone = useMutation({
@@ -171,7 +209,6 @@ export default function AgentPage() {
     mutationFn: manual2SaveGestion,
     onSuccess: () => {
       setDispo('');
-      setNotes('');
       setManual2Form({
         nombres: '',
         apellidos: '',
@@ -183,6 +220,23 @@ export default function AgentPage() {
       hydratedManual2PhoneRef.current = '';
       qc.invalidateQueries({ queryKey: ['manual2-contact'] });
       qc.invalidateQueries({ queryKey: ['manual2-history'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
+  const saveValidacionGestionMut = useMutation({
+    mutationFn: validacionClaroPeruSaveGestion,
+    onSuccess: () => {
+      setDispo('');
+      setValidacionClaroPeruForm({
+        nombres: '',
+        apellidos: '',
+        documento: '',
+        comentario: '',
+        encuesta: '',
+        subtipificacion: '',
+      });
+      hydratedValidacionLeadRef.current = '';
+      qc.invalidateQueries({ queryKey: ['validacion-claro-peru-formulario'] });
       qc.invalidateQueries({ queryKey: ['context'] });
     },
   });
@@ -274,6 +328,27 @@ export default function AgentPage() {
   }, [isManual2ByCampaign, normalizedRuntimeLeadPhone]);
 
   useEffect(() => {
+    if (!isValidacionClaroPeruByCampaign) {
+      hydratedValidacionLeadRef.current = '';
+      return;
+    }
+    const runtimeCallIdForHydrate =
+      c?.runtime?.callId || active.data?.lead?.callId || c?.lead?.callId || manualDialMut.data?.callId || manualNext.data?.callId || '';
+    const key = `${runtimeCallIdForHydrate}|${normalizedRuntimeLeadPhone}|${runtimeLeadDocument}`;
+    if (hydratedValidacionLeadRef.current !== key) {
+      hydratedValidacionLeadRef.current = key;
+      setValidacionClaroPeruForm({
+        nombres: '',
+        apellidos: '',
+        documento: runtimeLeadDocument,
+        comentario: '',
+        encuesta: '',
+        subtipificacion: '',
+      });
+    }
+  }, [isValidacionClaroPeruByCampaign, c?.runtime?.callId, active.data?.lead?.callId, c?.lead?.callId, manualDialMut.data?.callId, manualNext.data?.callId, normalizedRuntimeLeadPhone, runtimeLeadDocument]);
+
+  useEffect(() => {
     if (!isManual2ByCampaign || !manual2ContactQuery.data?.found || !manual2ContactQuery.data?.contacto) {
       return;
     }
@@ -286,6 +361,30 @@ export default function AgentPage() {
       origen: prev.origen || contacto.origen || 'MANUAL2',
     }));
   }, [isManual2ByCampaign, manual2ContactQuery.data]);
+
+  useEffect(() => {
+    if (!isValidacionClaroPeruByCampaign) {
+      return;
+    }
+    if (!validacionClaroPeruForm.documento && runtimeLeadDocument) {
+      setValidacionClaroPeruForm((prev) => ({ ...prev, documento: runtimeLeadDocument }));
+    }
+  }, [isValidacionClaroPeruByCampaign, runtimeLeadDocument, validacionClaroPeruForm.documento]);
+
+  useEffect(() => {
+    if (!isValidacionClaroPeruByCampaign || !validacionFormularioQuery.data?.found || !validacionFormularioQuery.data?.formulario) {
+      return;
+    }
+    const formulario = validacionFormularioQuery.data.formulario;
+    setValidacionClaroPeruForm((prev) => ({
+      ...prev,
+      nombres: prev.nombres || formulario.nombres || '',
+      apellidos: prev.apellidos || formulario.apellidos || '',
+      documento: prev.documento || formulario.documento || '',
+      comentario: prev.comentario || formulario.comentario || '',
+      encuesta: prev.encuesta || formulario.encuesta || '',
+    }));
+  }, [isValidacionClaroPeruByCampaign, validacionFormularioQuery.data]);
 
   const phoneConnected = Boolean(status.data?.phoneConnected);
   const campaignConnected = Boolean(status.data?.campaign);
@@ -309,33 +408,75 @@ export default function AgentPage() {
   const incallWithEvidence = runtimeAgentStatus === 'INCALL'
     && (hasStrongCallEvidence || (hasWeakCallEvidence && !hasNoLeadSignal));
   const callStillActive = dialingInProgress || incallWithEvidence;
-  const canFinalizeDisposition = canType && Boolean(dispo) && !callStillActive;
   const currentLeadPhone = c?.lead?.phoneNumber || active.data?.lead?.phoneNumber || manualNumber || '';
   const currentLeadDni = c?.lead?.dni || active.data?.lead?.dni || '';
   const currentLeadCampaign = c?.lead?.campaign || status.data?.campaign || campaign || '';
-  const isManual2Campaign = currentLeadCampaign.toUpperCase() === 'MANUAL2';
+  const currentLeadCampaignKey = normalizeCampaignKey(currentLeadCampaign);
+  const isManual2Campaign = currentLeadCampaignKey === 'MANUAL2';
+  const isValidacionClaroPeruCampaign = currentLeadCampaignKey === 'VALIDACIONCLAROPERU';
   const manual2DispoItems = (manual2DispositionsQuery.data?.items || []).map((item:any) => ({
+    status: String(item?.status || ''),
+    label: String(item?.label || item?.status || ''),
+  })).filter((item:{status:string;label:string}) => Boolean(item.status));
+  const validacionDispoItems = (validacionDispositionsQuery.data?.items || []).map((item:any) => ({
     status: String(item?.status || ''),
     label: String(item?.label || item?.status || ''),
   })).filter((item:{status:string;label:string}) => Boolean(item.status));
   const fallbackDispoItems = (c?.dispoOptions || []).map((value:string) => ({ status: value, label: value }));
   const dispoItems: Array<{status:string;label:string}> = isManual2Campaign
     ? (manual2DispoItems.length ? manual2DispoItems : fallbackDispoItems)
-    : fallbackDispoItems;
-  const subtipItems: Array<{codigo:string;nombre:string}> = (manual2SubtipificacionesQuery.data?.items || [])
+    : isValidacionClaroPeruCampaign
+      ? (validacionDispoItems.length ? validacionDispoItems : fallbackDispoItems)
+      : fallbackDispoItems;
+  const rawSubtipItems = isManual2Campaign
+    ? (manual2SubtipificacionesQuery.data?.items || [])
+    : isValidacionClaroPeruCampaign
+      ? (validacionSubtipificacionesQuery.data?.items || [])
+      : [];
+  const subtipItems: Array<{codigo:string;nombre:string}> = rawSubtipItems
     .map((item:any) => ({
       codigo: String(item?.codigo || ''),
       nombre: String(item?.nombre || item?.codigo || ''),
     }))
     .filter((item:{codigo:string;nombre:string}) => Boolean(item.codigo));
+  const validacionReady = !isValidacionClaroPeruCampaign
+    || (Boolean(validacionClaroPeruForm.documento.trim()) && Boolean(validacionClaroPeruForm.encuesta));
+  const canFinalizeDisposition = canType && Boolean(dispo) && !callStillActive && validacionReady;
   useEffect(() => {
-    if (!isManual2Campaign || !manual2Form.subtipificacion) {
+    const selectedSubtip = isManual2Campaign ? manual2Form.subtipificacion : validacionClaroPeruForm.subtipificacion;
+    if ((!isManual2Campaign && !isValidacionClaroPeruCampaign) || !selectedSubtip) {
       return;
     }
-    if (!subtipItems.some((item) => item.codigo === manual2Form.subtipificacion)) {
+    if (!subtipItems.some((item) => item.codigo === selectedSubtip)) {
+      if (isManual2Campaign) {
+        setManual2Form((prev) => ({ ...prev, subtipificacion: '' }));
+        return;
+      }
+      if (isValidacionClaroPeruCampaign) {
+        setValidacionClaroPeruForm((prev) => ({ ...prev, subtipificacion: '' }));
+      }
+    }
+  }, [
+    isManual2Campaign,
+    isValidacionClaroPeruCampaign,
+    manual2Form.subtipificacion,
+    validacionClaroPeruForm.subtipificacion,
+    subtipItems,
+  ]);
+  const hasCampaignSpecificComment = isManual2Campaign || isValidacionClaroPeruCampaign;
+  const currentCommentDraft = isManual2Campaign
+    ? manual2Form.comentario
+    : isValidacionClaroPeruCampaign
+      ? validacionClaroPeruForm.comentario
+      : notes;
+  useEffect(() => {
+    if (!isManual2Campaign) {
       setManual2Form((prev) => ({ ...prev, subtipificacion: '' }));
     }
-  }, [isManual2Campaign, manual2Form.subtipificacion, subtipItems]);
+    if (!isValidacionClaroPeruCampaign) {
+      setValidacionClaroPeruForm((prev) => ({ ...prev, subtipificacion: '' }));
+    }
+  }, [isManual2Campaign, isValidacionClaroPeruCampaign]);
   const canHangup = campaignConnected && (runtimeAgentStatus === 'INCALL' || Boolean(runtimeCallId));
   const availableCampaigns = campaignsQuery.data?.campaigns || [];
 
@@ -507,7 +648,7 @@ export default function AgentPage() {
         <ViciCard title='Paso 3 · Tipificación' subtitle='Guarda la gestión del lead activo.'>
           <Stack gap={1.5}>
             {!canType && (
-              <Alert severity='info'>Debes conectar anexo y campaña para habilitar disposición, notas y guardado.</Alert>
+              <Alert severity='info'>Debes conectar anexo y campaña para habilitar disposición, comentario y guardado.</Alert>
             )}
 
             <Divider />
@@ -589,6 +730,75 @@ export default function AgentPage() {
               </Stack>
             )}
 
+            {isValidacionClaroPeruCampaign && (
+              <Stack gap={1} sx={{ p: 1.5, borderRadius: 2, bgcolor: 'grey.100' }}>
+                <Typography variant='subtitle2' fontWeight={700}>Formulario ValidacionClaroPeru</Typography>
+                {validacionLookupDocumento ? (
+                  <Alert severity={validacionFormularioQuery.data?.found ? 'success' : 'info'}>
+                    {validacionFormularioQuery.data?.found
+                      ? 'Documento encontrado en BD del sistema. Puedes actualizar datos y guardar gestion.'
+                      : 'Documento no registrado. Completa datos y se creara registro al guardar.'}
+                  </Alert>
+                ) : (
+                  <Alert severity='info'>Ingresa documento para precargar datos historicos de esta campana.</Alert>
+                )}
+                <Stack direction={{ xs: 'column', md: 'row' }} gap={1}>
+                  <TextField
+                    label='Nombres'
+                    value={validacionClaroPeruForm.nombres}
+                    onChange={(e) => setValidacionClaroPeruForm((prev) => ({ ...prev, nombres: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    label='Apellidos'
+                    value={validacionClaroPeruForm.apellidos}
+                    onChange={(e) => setValidacionClaroPeruForm((prev) => ({ ...prev, apellidos: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    label='Documento'
+                    value={validacionClaroPeruForm.documento}
+                    onChange={(e) => setValidacionClaroPeruForm((prev) => ({ ...prev, documento: e.target.value }))}
+                    fullWidth
+                  />
+                </Stack>
+                <TextField
+                  label='Comentario'
+                  multiline
+                  minRows={2}
+                  value={validacionClaroPeruForm.comentario}
+                  onChange={(e) => setValidacionClaroPeruForm((prev) => ({ ...prev, comentario: e.target.value }))}
+                />
+                <Stack direction={{ xs: 'column', md: 'row' }} gap={1}>
+                  <TextField
+                    select
+                    label='Encuesta'
+                    value={validacionClaroPeruForm.encuesta}
+                    onChange={(e) => setValidacionClaroPeruForm((prev) => ({ ...prev, encuesta: e.target.value }))}
+                    fullWidth
+                  >
+                    <MenuItem value=''>Seleccionar</MenuItem>
+                    <MenuItem value='SI'>SI</MenuItem>
+                    <MenuItem value='NO'>NO</MenuItem>
+                  </TextField>
+                  <TextField
+                    select
+                    label='Subtipificacion'
+                    value={validacionClaroPeruForm.subtipificacion}
+                    onChange={(e) => setValidacionClaroPeruForm((prev) => ({ ...prev, subtipificacion: e.target.value }))}
+                    fullWidth
+                  >
+                    <MenuItem value=''>Sin subtipificacion</MenuItem>
+                    {subtipItems.map((item) => (
+                      <MenuItem key={item.codigo} value={item.codigo}>
+                        {item.nombre}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Stack>
+              </Stack>
+            )}
+
             <TextField
               select
               label='Disposición'
@@ -603,18 +813,20 @@ export default function AgentPage() {
               ))}
             </TextField>
 
-            <TextField
-              label='Notas'
-              multiline
-              minRows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={!canType}
-            />
+            {!hasCampaignSpecificComment && (
+              <TextField
+                label='Comentario'
+                multiline
+                minRows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                disabled={!canType}
+              />
+            )}
 
             <Button
               variant='contained'
-              disabled={!canFinalizeDisposition || save.isPending || saveManual2GestionMut.isPending}
+              disabled={!canFinalizeDisposition || save.isPending || saveManual2GestionMut.isPending || saveValidacionGestionMut.isPending}
               onClick={() => {
                 if (isManual2Campaign) {
                   const recordingFromHangup = String(hangupMut.data?.details?.recordingFilename || '');
@@ -631,7 +843,32 @@ export default function AgentPage() {
                     tipificacion: dispo,
                     disposicion: dispo,
                     subtipificacion: manual2Form.subtipificacion || null,
-                    observaciones: notes,
+                    observaciones: manual2Form.comentario || null,
+                    modoLlamada: mode,
+                    leadId: leadId || null,
+                    callId: runtimeCallId || null,
+                    uniqueId: c?.runtime?.uniqueId || c?.lead?.uniqueId || null,
+                    nombreAudio: resolvedRecording || null,
+                    duracion: Number(c?.runtime?.details?.liveCallSeconds || 0) || null,
+                  });
+                  return;
+                }
+                if (isValidacionClaroPeruCampaign) {
+                  const recordingFromHangup = String(hangupMut.data?.details?.recordingFilename || '');
+                  const fallbackRecordingFromRuntime = String(c?.runtime?.details?.recordingFilename || '');
+                  const resolvedRecording = recordingFromHangup || fallbackRecordingFromRuntime;
+                  saveValidacionGestionMut.mutate({
+                    campaignId: currentLeadCampaign || 'ValidacionClaroPeru',
+                    phoneNumber: normalizedRuntimeLeadPhone || currentLeadPhone,
+                    nombres: validacionClaroPeruForm.nombres,
+                    apellidos: validacionClaroPeruForm.apellidos,
+                    documento: validacionClaroPeruForm.documento,
+                    comentario: validacionClaroPeruForm.comentario,
+                    encuesta: validacionClaroPeruForm.encuesta,
+                    tipificacion: dispo,
+                    disposicion: dispo,
+                    subtipificacion: validacionClaroPeruForm.subtipificacion || null,
+                    observaciones: validacionClaroPeruForm.comentario || null,
                     modoLlamada: mode,
                     leadId: leadId || null,
                     callId: runtimeCallId || null,
@@ -658,7 +895,7 @@ export default function AgentPage() {
 
             {callStillActive && canType && (
               <Alert severity='info'>
-                La tipificación final se habilita cuando la llamada termine. Puedes seguir editando disposición y notas como borrador.
+                La tipificacion final se habilita cuando la llamada termine. Puedes seguir editando disposicion y comentario como borrador.
               </Alert>
             )}
 
@@ -683,6 +920,24 @@ export default function AgentPage() {
             {saveManual2GestionMut.isError && (
               <Alert severity='error'>
                 No se pudo guardar la gestiÃ³n final de Manual2.
+              </Alert>
+            )}
+
+            {saveValidacionGestionMut.isError && (saveValidacionGestionMut.error as any)?.response?.data?.code === 'VICIDIAL_CALL_STILL_ACTIVE' && (
+              <Alert severity='warning'>
+                La llamada sigue activa. Finaliza la llamada antes de guardar la gestion de ValidacionClaroPeru.
+              </Alert>
+            )}
+
+            {saveValidacionGestionMut.data?.ok && (
+              <Alert severity='success'>
+                Gestion ValidacionClaroPeru guardada correctamente en la BD del sistema.
+              </Alert>
+            )}
+
+            {saveValidacionGestionMut.isError && (
+              <Alert severity='error'>
+                No se pudo guardar la gestion final de ValidacionClaroPeru.
               </Alert>
             )}
 
@@ -800,12 +1055,12 @@ export default function AgentPage() {
                 onClick={() =>
                   hangupMut.mutate({
                     campaignId: currentLeadCampaign,
-                    dispo: isManual2Campaign ? undefined : (dispo || 'N'),
+                    dispo: (isManual2Campaign || isValidacionClaroPeruCampaign) ? undefined : (dispo || 'N'),
                     mode,
                     leadId,
                     phoneNumber: currentLeadPhone,
                     dni: currentLeadDni,
-                    notes,
+                    notes: currentCommentDraft,
                     extra: {
                       source: 'agent-ui-hangup',
                       skipCrmInteractionSave: true,

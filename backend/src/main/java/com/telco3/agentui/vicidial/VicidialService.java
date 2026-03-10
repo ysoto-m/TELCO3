@@ -1,7 +1,7 @@
 package com.telco3.agentui.vicidial;
 
 import com.telco3.agentui.agent.VicidialCredentialService;
-import com.telco3.agentui.domain.Entities;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -98,7 +98,7 @@ public class VicidialService {
     return "predictive";
   }
 
-  public DialNextResult dialNextWithLeadRetry(String agentUser, Entities.AgentVicidialCredentialEntity session, String rawBody, String callId, Long leadId) {
+  public DialNextResult dialNextWithLeadRetry(String agentUser, AgentVicidialCredentialEntity session, String rawBody, String callId, Long leadId) {
     RealtimeCallSnapshot snapshot = resolveRealtimeCallSnapshot(agentUser, session, callId, leadId, null, session.connectedCampaign, true);
     Long resolvedLeadId = snapshot.leadId();
     String resolvedCallId = firstNonBlank(snapshot.callId(), callId);
@@ -110,7 +110,7 @@ public class VicidialService {
     return new DialNextResult(resolvedCallId, resolvedLeadId, snapshot.classification());
   }
 
-  public DialNextResult resolveManualDialLead(String agentUser, Entities.AgentVicidialCredentialEntity session, String callId, Long leadId, String phoneNumber) {
+  public DialNextResult resolveManualDialLead(String agentUser, AgentVicidialCredentialEntity session, String callId, Long leadId, String phoneNumber) {
     RealtimeCallSnapshot snapshot = resolveRealtimeCallSnapshot(agentUser, session, callId, leadId, phoneNumber, session.connectedCampaign, true);
     Long resolvedLeadId = snapshot.leadId();
     String resolvedCallId = firstNonBlank(snapshot.callId(), callId);
@@ -127,7 +127,7 @@ public class VicidialService {
   public DialFollowUpResult followUpManualDial(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       VicidialDialResponseParser.DetailedParsedDialResponse parsedResponse,
       String requestedPhoneNumber
@@ -367,7 +367,7 @@ public class VicidialService {
   public void manualDialLogEnd(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       Long leadId,
       String dispo
@@ -392,7 +392,7 @@ public class VicidialService {
   public PostCallSyncResult syncPostCallDisposition(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       Long leadIdHint,
       String callIdHint,
@@ -498,7 +498,7 @@ public class VicidialService {
   public LogoutFlowResult logoutAgentSession(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session
+      AgentVicidialCredentialEntity session
   ) {
     Map<String, Object> details = new LinkedHashMap<>();
     if (!StringUtils.hasText(agentPass)) {
@@ -550,7 +550,7 @@ public class VicidialService {
   public HangupResult hangupActiveCall(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       String dispo
   ) {
@@ -653,7 +653,7 @@ public class VicidialService {
     return new HangupResult(true, "HANGUP_SENT", callId, leadId, uniqueId, channel, agentStatus, details);
   }
 
-  public ActiveLeadState classifyActiveLead(String agentUser, Entities.AgentVicidialCredentialEntity session) {
+  public ActiveLeadState classifyActiveLead(String agentUser, AgentVicidialCredentialEntity session) {
     RealtimeCallSnapshot snapshot = resolveRealtimeCallSnapshot(agentUser, session, session.currentCallId, session.currentLeadId, null, session.connectedCampaign, true);
     if (snapshot.reloginRequired()) {
       return ActiveLeadState.relogin(snapshot.httpStatus(), "");
@@ -684,7 +684,7 @@ public class VicidialService {
 
   public RealtimeCallSnapshot resolveRealtimeCallSnapshot(
       String agentUser,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String callIdHint,
       Long leadIdHint,
       String phoneHint,
@@ -698,7 +698,7 @@ public class VicidialService {
   public RealtimeCallSnapshot resolveRealtimeCallSnapshot(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String callIdHint,
       Long leadIdHint,
       String phoneHint,
@@ -820,7 +820,7 @@ public class VicidialService {
     );
   }
 
-  public RuntimeLeadResolution resolveLeadFromRuntimeTables(Entities.AgentVicidialCredentialEntity session, String callId, String phoneNumber) {
+  public RuntimeLeadResolution resolveLeadFromRuntimeTables(AgentVicidialCredentialEntity session, String callId, String phoneNumber) {
     JdbcTemplate jdbc;
     try {
       jdbc = new JdbcTemplate(dataSourceFactory.getOrCreate());
@@ -840,7 +840,7 @@ public class VicidialService {
     return fromLiveAgents;
   }
 
-  private RuntimeLeadResolution queryFromLiveAgents(JdbcTemplate jdbc, Entities.AgentVicidialCredentialEntity session) {
+  private RuntimeLeadResolution queryFromLiveAgents(JdbcTemplate jdbc, AgentVicidialCredentialEntity session) {
     String sql = """
         SELECT user, status, campaign_id, lead_id, callerid, uniqueid, channel, extension, conf_exten
           FROM vicidial_live_agents
@@ -876,7 +876,7 @@ public class VicidialService {
 
   private RuntimeLeadResolution queryFromAutoCalls(
       JdbcTemplate jdbc,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String callId,
       String phoneNumber,
       RuntimeLeadResolution liveAgentState
@@ -942,7 +942,7 @@ public class VicidialService {
     }
   }
 
-  private Map<String, String> buildAgentRuntimePayload(String agentUser, String agentPass, Entities.AgentVicidialCredentialEntity session, String campaignId) {
+  private Map<String, String> buildAgentRuntimePayload(String agentUser, String agentPass, AgentVicidialCredentialEntity session, String campaignId) {
     LinkedHashMap<String, String> payload = new LinkedHashMap<>();
     String resolvedExten = resolveDialExten(session);
     String resolvedConfExten = normalizeConfExten(session.confExten, session.connectedPhoneLogin);
@@ -1014,7 +1014,7 @@ public class VicidialService {
 
   private Map<String, String> buildUserLogoutPayload(
       Map<String, String> basePayload,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaign,
       String phoneIp,
       String dialMethod
@@ -1053,7 +1053,7 @@ public class VicidialService {
 
   private Map<String, String> buildMonitorConfPayload(
       Map<String, String> basePayload,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String callId,
       Long leadId,
       String uniqueId,
@@ -1086,7 +1086,7 @@ public class VicidialService {
 
   private Map<String, String> buildLogPayload(
       Map<String, String> basePayload,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String callId,
       Long leadId,
       String uniqueId,
@@ -1134,7 +1134,7 @@ public class VicidialService {
 
   private Map<String, String> buildHangupConfDialPayload(
       Map<String, String> basePayload,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       String confExten
   ) {
@@ -1150,7 +1150,7 @@ public class VicidialService {
 
   private Map<String, String> buildHangupPayload(
       Map<String, String> basePayload,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       String confExten,
       String channel
@@ -1190,7 +1190,7 @@ public class VicidialService {
 
   private Map<String, String> buildUpdateDispoPayload(
       Map<String, String> basePayload,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       String callId,
       Long leadId,
@@ -1286,7 +1286,7 @@ public class VicidialService {
         "vdrp_stage");
   }
 
-  private String resolveDialExten(Entities.AgentVicidialCredentialEntity session) {
+  private String resolveDialExten(AgentVicidialCredentialEntity session) {
     String extension = firstNonBlank(
         session.extension,
         resolveDefaultRecordingExten(),
@@ -1321,7 +1321,7 @@ public class VicidialService {
     return value;
   }
 
-  private String resolveProtocol(Entities.AgentVicidialCredentialEntity session) {
+  private String resolveProtocol(AgentVicidialCredentialEntity session) {
     if (StringUtils.hasText(session.protocol)) {
       String protocol = session.protocol.trim().toUpperCase(Locale.ROOT);
       if (!containsPlaceholderToken(protocol)) {
@@ -1337,7 +1337,7 @@ public class VicidialService {
     return "";
   }
 
-  private String resolveLogoutDialMethod(Entities.AgentVicidialCredentialEntity session, String campaign) {
+  private String resolveLogoutDialMethod(AgentVicidialCredentialEntity session, String campaign) {
     try {
       if (StringUtils.hasText(campaign)) {
         String fromCampaign = firstNonBlank(campaignMode(campaign).dialMethodRaw());
@@ -1432,7 +1432,7 @@ public class VicidialService {
     return StringUtils.hasText(left) && StringUtils.hasText(right) && left.equals(right);
   }
 
-  private String resolveMonitorChannel(Entities.AgentVicidialCredentialEntity session, String normalizedConfExten) {
+  private String resolveMonitorChannel(AgentVicidialCredentialEntity session, String normalizedConfExten) {
     if (StringUtils.hasText(normalizedConfExten)) {
       return buildConferenceLocalChannel(normalizedConfExten);
     }
@@ -1911,3 +1911,4 @@ public class VicidialService {
     }
   }
 }
+

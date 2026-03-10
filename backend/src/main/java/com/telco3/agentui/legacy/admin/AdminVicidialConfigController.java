@@ -1,4 +1,4 @@
-package com.telco3.agentui.admin;
+package com.telco3.agentui.legacy.admin;
 
 import com.telco3.agentui.settings.SettingsController;
 import org.springframework.web.bind.annotation.GetMapping;

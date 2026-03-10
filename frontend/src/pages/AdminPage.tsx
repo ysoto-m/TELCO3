@@ -1,6 +1,24 @@
 import { Alert, Box, Button, Card, CardContent, Container, Grid, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { adminAgents, adminCampaigns, adminCreateUser, adminExportCsvUrl, adminInteractions, adminManual2ExportCsvUrl, adminManual2Report, adminManual2SaveSubtipificacion, adminManual2SetSubtipificacionActivo, adminManual2Subtipificaciones, adminSettings, adminSummary, adminUpdateAgentPass, adminUpdateSettings, adminUsers } from '../api/sdk';
+import {
+  adminAgents,
+  adminCampaigns,
+  adminCreateUser,
+  adminExportCsvUrl,
+  adminInteractions,
+  adminManual2ExportCsvUrl,
+  adminManual2Report,
+  adminManual2SaveSubtipificacion,
+  adminManual2SetSubtipificacionActivo,
+  adminManual2Subtipificaciones,
+  adminSettings,
+  adminSummary,
+  adminUpdateAgentPass,
+  adminUpdateSettings,
+  adminUsers,
+  adminValidacionClaroPeruExportCsvUrl,
+  adminValidacionClaroPeruReport
+} from '../api/sdk';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -26,13 +44,15 @@ export default function AdminPage(){
   const navigate = useNavigate();
   const [filters, setFilters] = useState({ campaign: '', agentUser: '', dispo: '', from: today, to: today, page: 0, size: 20 });
   const [manual2Filters, setManual2Filters] = useState({ campana: 'Manual2', agente: '', tipificacion: '', disposicion: '', subtipificacion: '', telefono: '', cliente: '', from: today, to: today, page: 0, size: 20 });
+  const [validacionFilters, setValidacionFilters] = useState({ campana: 'ValidacionClaroPeru', agente: '', tipificacion: '', disposicion: '', subtipificacion: '', telefono: '', documento: '', encuesta: '', from: today, to: today, page: 0, size: 20 });
   const [subtipForm, setSubtipForm] = useState({ campana: 'Manual2', codigo: '', nombre: '', tipificacion: '', activo: true });
   const summary = useQuery({ queryKey:['admin-summary'], queryFn: adminSummary, refetchInterval: 8000 });
   const agents = useQuery({ queryKey:['admin-agents'], queryFn: adminAgents, refetchInterval: 8000 });
   const campaigns = useQuery({ queryKey:['admin-campaigns'], queryFn: adminCampaigns });
   const interactions = useQuery({ queryKey:['admin-interactions',filters], queryFn:()=>adminInteractions(filters) });
   const manual2Report = useQuery({ queryKey:['admin-manual2-report',manual2Filters], queryFn:()=>adminManual2Report(manual2Filters) });
-  const subtipificaciones = useQuery({ queryKey:['admin-manual2-subtipificaciones', manual2Filters.campana], queryFn:()=>adminManual2Subtipificaciones(manual2Filters.campana) });
+  const validacionReport = useQuery({ queryKey:['admin-validacion-claro-peru-report',validacionFilters], queryFn:()=>adminValidacionClaroPeruReport(validacionFilters) });
+  const subtipificaciones = useQuery({ queryKey:['admin-manual2-subtipificaciones', subtipForm.campana], queryFn:()=>adminManual2Subtipificaciones(subtipForm.campana) });
   const users = useQuery({ queryKey:['admin-users'], queryFn: adminUsers });
   const settings = useQuery({ queryKey:['admin-settings'], queryFn: adminSettings });
   const createUser = useMutation({ mutationFn: adminCreateUser, onSuccess: ()=>users.refetch() });
@@ -45,7 +65,7 @@ export default function AdminPage(){
     }
   });
   const toggleSubtipificacion = useMutation({
-    mutationFn: ({codigo, activo}:{codigo:string;activo:boolean})=>adminManual2SetSubtipificacionActivo(codigo, { campana: manual2Filters.campana, activo }),
+    mutationFn: ({codigo, activo}:{codigo:string;activo:boolean})=>adminManual2SetSubtipificacionActivo(codigo, { campana: subtipForm.campana, activo }),
     onSuccess: ()=>subtipificaciones.refetch()
   });
   const [newUser,setNewUser]=useState({username:'',password:'',role:'AGENT',active:true});
@@ -62,10 +82,12 @@ export default function AdminPage(){
 
   const exportUrl = useMemo(()=>adminExportCsvUrl(filters), [filters]);
   const manual2ExportUrl = useMemo(()=>adminManual2ExportCsvUrl(manual2Filters), [manual2Filters]);
+  const validacionExportUrl = useMemo(()=>adminValidacionClaroPeruExportCsvUrl(validacionFilters), [validacionFilters]);
   const k:any = summary.data || {};
   const rows:any[] = agents.data?.items || [];
   const ir:any = interactions.data || {};
   const manual2Rows:any = manual2Report.data || {};
+  const validacionRows:any = validacionReport.data || {};
   const formCfg = cfg || buildEditableConfig(settings.data);
 
   const mergeCfg = (patch:any) => {
@@ -142,7 +164,28 @@ export default function AdminPage(){
         </TableBody></Table>
       </Stack></CardContent></Card>
 
-      <Card><CardContent><Stack gap={1}><Typography variant='h6'>Subtipificaciones Manual2</Typography>
+      <Card><CardContent><Stack gap={1}><Typography variant='h6'>Reporte ValidacionClaroPeru (BD sistema)</Typography>
+        <Stack direction='row' gap={1} flexWrap='wrap'>
+          <TextField label='Campana' value={validacionFilters.campana} onChange={e=>setValidacionFilters({...validacionFilters,campana:e.target.value,page:0})}/>
+          <TextField label='Agente' value={validacionFilters.agente} onChange={e=>setValidacionFilters({...validacionFilters,agente:e.target.value,page:0})}/>
+          <TextField label='Tipificacion' value={validacionFilters.tipificacion} onChange={e=>setValidacionFilters({...validacionFilters,tipificacion:e.target.value,page:0})}/>
+          <TextField label='Disposicion' value={validacionFilters.disposicion} onChange={e=>setValidacionFilters({...validacionFilters,disposicion:e.target.value,page:0})}/>
+          <TextField label='Subtipificacion' value={validacionFilters.subtipificacion} onChange={e=>setValidacionFilters({...validacionFilters,subtipificacion:e.target.value,page:0})}/>
+          <TextField label='Telefono' value={validacionFilters.telefono} onChange={e=>setValidacionFilters({...validacionFilters,telefono:e.target.value,page:0})}/>
+          <TextField label='Documento' value={validacionFilters.documento} onChange={e=>setValidacionFilters({...validacionFilters,documento:e.target.value,page:0})}/>
+          <TextField label='Encuesta (SI/NO)' value={validacionFilters.encuesta} onChange={e=>setValidacionFilters({...validacionFilters,encuesta:e.target.value,page:0})}/>
+          <TextField type='date' label='Desde' value={validacionFilters.from} onChange={e=>setValidacionFilters({...validacionFilters,from:e.target.value,page:0})} InputLabelProps={{shrink:true}}/>
+          <TextField type='date' label='Hasta' value={validacionFilters.to} onChange={e=>setValidacionFilters({...validacionFilters,to:e.target.value,page:0})} InputLabelProps={{shrink:true}}/>
+          <Button href={validacionExportUrl} target='_blank'>Export CSV</Button>
+        </Stack>
+        <Table size='small'><TableHead><TableRow>
+          <TableCell>Fecha</TableCell><TableCell>Agente</TableCell><TableCell>Campana</TableCell><TableCell>Telefono</TableCell><TableCell>Nombres</TableCell><TableCell>Documento</TableCell><TableCell>Tipificacion</TableCell><TableCell>Dispo</TableCell><TableCell>Subtip</TableCell><TableCell>Comentario</TableCell><TableCell>Encuesta</TableCell><TableCell>Audio</TableCell><TableCell>Lead</TableCell><TableCell>Call</TableCell><TableCell>Unique</TableCell>
+        </TableRow></TableHead><TableBody>
+          {(validacionRows.items||[]).map((r:any)=><TableRow key={r.id}><TableCell>{r.fechaGestion}</TableCell><TableCell>{r.agente}</TableCell><TableCell>{r.campana}</TableCell><TableCell>{r.telefono}</TableCell><TableCell>{`${r.nombres||''} ${r.apellidos||''}`.trim()}</TableCell><TableCell>{r.documento}</TableCell><TableCell>{r.tipificacion}</TableCell><TableCell>{r.disposicion}</TableCell><TableCell>{r.subtipificacion}</TableCell><TableCell>{r.comentario}</TableCell><TableCell>{r.encuesta}</TableCell><TableCell>{r.nombreAudio}</TableCell><TableCell>{r.leadId}</TableCell><TableCell>{r.callId}</TableCell><TableCell>{r.uniqueId}</TableCell></TableRow>)}
+        </TableBody></Table>
+      </Stack></CardContent></Card>
+
+      <Card><CardContent><Stack gap={1}><Typography variant='h6'>Subtipificaciones por campana</Typography>
         <Stack direction='row' gap={1} flexWrap='wrap'>
           <TextField label='Campana' value={subtipForm.campana} onChange={e=>setSubtipForm({...subtipForm,campana:e.target.value})}/>
           <TextField label='Tipificacion' value={subtipForm.tipificacion} onChange={e=>setSubtipForm({...subtipForm,tipificacion:e.target.value})}/>

@@ -1,14 +1,20 @@
 package com.telco3.agentui.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.telco3.agentui.domain.*;
-import com.telco3.agentui.domain.Entities.*;
+import com.telco3.agentui.legacy.CustomerEntity;
+import com.telco3.agentui.legacy.CustomerPhoneRepository;
+import com.telco3.agentui.legacy.CustomerRepository;
+import com.telco3.agentui.legacy.InteractionEntity;
+import com.telco3.agentui.legacy.InteractionRepository;
+import com.telco3.agentui.legacy.SyncStatus;
 import com.telco3.agentui.manual2.Manual2Service;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialDialRequestBuilder;
 import com.telco3.agentui.vicidial.VicidialDialResponseParser;
 import com.telco3.agentui.vicidial.VicidialServiceException;
 import com.telco3.agentui.vicidial.VicidialService;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import jakarta.validation.constraints.NotBlank;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -141,8 +147,8 @@ public class AgentController {
             null));
 
     Map<String, String> heartbeatPayload = buildVdcHeartbeatPayload(agentUser, agentPass, session, session.connectedCampaign);
-    var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
     var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
+    var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
 
     return Map.of(
         "ok", true,
@@ -165,15 +171,15 @@ public class AgentController {
     sessionGuardService.requireSessionField(session.serverIp, "server_ip");
     sessionGuardService.requireSessionField(session.sessionName, "session_name");
     if (session.agentLogId == null) {
-      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesión Vicidial está incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
+      throw new VicidialServiceException(HttpStatus.CONFLICT, "VICIDIAL_SESSION_INCOMPLETE", "La sesiÃƒÂ³n Vicidial estÃƒÂ¡ incompleta.", "Falta el campo requerido: agent_log_id", Map.of("missingField", "agent_log_id"));
     }
 
     var state = vicidialService.classifyActiveLead(agentUser, session);
     if (state.reloginRequired()) {
       throw new VicidialServiceException(HttpStatus.CONFLICT,
           "VICIDIAL_RELOGIN_REQUIRED",
-          "La sesión de Vicidial requiere re-login.",
-          "Conecte anexo/campaña nuevamente para continuar.",
+          "La sesiÃƒÂ³n de Vicidial requiere re-login.",
+          "Conecte anexo/campaÃƒÂ±a nuevamente para continuar.",
           null);
     }
     if (state.dialing()) {
@@ -193,7 +199,7 @@ public class AgentController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("ok", false);
         body.put("code", "VICIDIAL_AGENT_PAUSED");
-        body.put("message", "El agente está en pausa");
+        body.put("message", "El agente estÃƒÂ¡ en pausa");
         body.put("hint", "Quite la pausa en Vicidial para recibir/continuar el lead activo.");
         body.put("details", details);
         return body;
@@ -299,7 +305,7 @@ public class AgentController {
   private Map<String, Object> executeDialFlow(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId,
       String mode,
       Map<String, String> payload,
@@ -340,8 +346,8 @@ public class AgentController {
     }
 
     Map<String, String> heartbeatPayload = buildVdcHeartbeatPayload(agentUser, agentPass, session, campaignId);
-    var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
     var updateSettingsResult = vicidial.updateSettings(agentUser, heartbeatPayload);
+    var callbackCountResult = vicidial.callbacksCount(agentUser, heartbeatPayload);
 
     var result = vicidial.manualDialNextCall(agentUser, payload);
     String raw = Objects.toString(result.body(), "");
@@ -681,7 +687,7 @@ public class AgentController {
       String agentUser,
       HangupReq req,
       VicidialService.HangupResult hangupResult,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String fallbackCampaign
   ) {
     if (req == null || !StringUtils.hasText(req.dispo()) || hangupResult == null || !hangupResult.executed()) {
@@ -801,7 +807,7 @@ public class AgentController {
   private Map<String, String> buildVdcHeartbeatPayload(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String campaignId
   ) {
     LinkedHashMap<String, String> payload = new LinkedHashMap<>();
@@ -809,7 +815,10 @@ public class AgentController {
     payload.put("pass", agentPass);
     payload.put("server_ip", session.serverIp);
     payload.put("session_name", session.sessionName);
+    payload.put("agent_user", agentUser);
     payload.put("campaign", campaignId);
+    payload.put("phone_login", session.connectedPhoneLogin);
+    payload.put("conf_exten", firstNonBlank(session.confExten, session.connectedPhoneLogin));
     payload.put("agent_log_id", Objects.toString(session.agentLogId, ""));
     payload.put("format", "text");
     return payload;
@@ -929,11 +938,11 @@ public class AgentController {
       default -> code;
     };
     String hint = switch (classification) {
-      case RELOGIN_REQUIRED -> "Conecte anexo/campaña nuevamente para continuar.";
-      case INVALID_SESSION -> "Revise sesión AGC/cookies y consistencia de parámetros de marcación.";
+      case RELOGIN_REQUIRED -> "Conecte anexo/campaÃƒÂ±a nuevamente para continuar.";
+      case INVALID_SESSION -> "Revise sesiÃƒÂ³n AGC/cookies y consistencia de parÃƒÂ¡metros de marcaciÃƒÂ³n.";
       case NO_LEADS -> "No hay leads disponibles en el hopper para este agente.";
-      case INVALID_PARAMS -> "Revise los parámetros enviados para marcación manual.";
-      default -> "Valide parámetros de sesión (session_name/server_ip/agent_log_id) y estado del agente.";
+      case INVALID_PARAMS -> "Revise los parÃƒÂ¡metros enviados para marcaciÃƒÂ³n manual.";
+      default -> "Valide parÃƒÂ¡metros de sesiÃƒÂ³n (session_name/server_ip/agent_log_id) y estado del agente.";
     };
     Map<String, Object> details = new LinkedHashMap<>();
     details.put("httpStatus", httpStatus);
@@ -978,5 +987,6 @@ public class AgentController {
         && !"prod".equalsIgnoreCase(environment.getProperty("APP_ENV", environment.getProperty("app.env", "")));
   }
 }
+
 
 

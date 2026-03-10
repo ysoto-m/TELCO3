@@ -1,6 +1,6 @@
 package com.telco3.agentui.vicidial;
 
-import com.telco3.agentui.domain.Entities;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -32,7 +32,7 @@ public class VicidialDialRequestBuilder {
   public Map<String, String> buildDialNextPayload(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String requestedCampaign
   ) {
     return buildPayload(agentUser, agentPass, session, requestedCampaign, null);
@@ -41,7 +41,7 @@ public class VicidialDialRequestBuilder {
   public Map<String, String> buildManualDialPayload(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String requestedCampaign,
       ManualDialOverrides overrides
   ) {
@@ -51,7 +51,7 @@ public class VicidialDialRequestBuilder {
   private Map<String, String> buildPayload(
       String agentUser,
       String agentPass,
-      Entities.AgentVicidialCredentialEntity session,
+      AgentVicidialCredentialEntity session,
       String requestedCampaign,
       ManualDialOverrides overrides
   ) {
@@ -146,7 +146,7 @@ public class VicidialDialRequestBuilder {
     return campaign;
   }
 
-  private void validateSession(Entities.AgentVicidialCredentialEntity session) {
+  private void validateSession(AgentVicidialCredentialEntity session) {
     Map<String, String> missing = new LinkedHashMap<>();
     captureMissing(missing, "phone_login", session.connectedPhoneLogin);
     captureMissing(missing, "campaign", session.connectedCampaign);
@@ -178,7 +178,7 @@ public class VicidialDialRequestBuilder {
     return value == null || value.isBlank() ? fallback : value;
   }
 
-  private String buildChannel(Entities.AgentVicidialCredentialEntity session) {
+  private String buildChannel(AgentVicidialCredentialEntity session) {
     String normalizedConfExten = normalizeConfExten(session.confExten, null);
     if (normalizedConfExten != null) {
       return buildConferenceLocalChannel(normalizedConfExten);
@@ -190,7 +190,7 @@ public class VicidialDialRequestBuilder {
     return "";
   }
 
-  private String resolveDialExten(Entities.AgentVicidialCredentialEntity session) {
+  private String resolveDialExten(AgentVicidialCredentialEntity session) {
     String extension = firstNonBlank(
         session.extension,
         normalizeDialExten(dialProperties.getDefaultRecordingExten()),

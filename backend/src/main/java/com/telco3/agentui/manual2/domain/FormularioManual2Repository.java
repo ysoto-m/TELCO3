@@ -1,4 +1,4 @@
-package com.telco3.agentui.domain;
+package com.telco3.agentui.manual2.domain;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 

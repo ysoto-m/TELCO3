@@ -1,10 +1,10 @@
 package com.telco3.agentui.agent;
 
-import com.telco3.agentui.domain.AgentVicidialCredentialRepository;
-import com.telco3.agentui.domain.Entities;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialRuntimeDataSourceFactory;
 import com.telco3.agentui.vicidial.VicidialService;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -42,12 +42,12 @@ public class AgentSessionLifecycleService {
   }
 
   public LogoutResult logout(String appUsername, String reason) {
-    Optional<Entities.AgentVicidialCredentialEntity> optional = repo.findByAppUsername(appUsername);
+    Optional<AgentVicidialCredentialEntity> optional = repo.findByAppUsername(appUsername);
     if (optional.isEmpty()) {
       return new LogoutResult(true, false, "NO_SESSION", Map.of());
     }
 
-    Entities.AgentVicidialCredentialEntity session = optional.get();
+    AgentVicidialCredentialEntity session = optional.get();
     String vicidialAgentUser = firstNonBlank(session.agentUser, appUsername);
     Map<String, Object> details = new LinkedHashMap<>();
     details.put("connectedBeforeLogout", session.connected);

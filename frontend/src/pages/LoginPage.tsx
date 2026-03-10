@@ -25,7 +25,7 @@ export default function LoginPage() {
   return (
     <Container maxWidth='sm' sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', py: 4 }}>
       <Stack spacing={2} sx={{ width: '100%' }}>
-        <ViciCard title='Vicidial CRM' subtitle='Acceso de agente al flujo operativo'>
+        <ViciCard title='APU CONTACT' subtitle='Acceso de agente al flujo operativo'>
           <Stack
             component='form'
             spacing={2}

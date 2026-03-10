@@ -1,5 +1,4 @@
-package com.telco3.agentui.domain;
-
+package com.telco3.agentui.legacy;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,7 +12,7 @@ import java.time.OffsetDateTime;
 
 /**
  * Legacy domain (english naming) kept for compatibility with existing agent interactions endpoints.
- * New campaign work should prefer {@link InteraccionEntity}.
+ * New campaign work should prefer {@link com.telco3.agentui.domain.InteraccionEntity}.
  */
 @Deprecated(forRemoval = false, since = "1.3.0")
 @Entity(name = "InteractionEntity")
@@ -30,7 +29,7 @@ public class InteractionEntity {
   public String dispo;
   @Column(columnDefinition = "text") public String notes;
   @Column(columnDefinition = "text") public String extraJson;
-  @Enumerated(EnumType.STRING) public Entities.SyncStatus syncStatus = Entities.SyncStatus.PENDING;
+  @Enumerated(EnumType.STRING) public SyncStatus syncStatus = SyncStatus.PENDING;
   @Column(columnDefinition = "text") public String lastError;
   public OffsetDateTime createdAt = OffsetDateTime.now();
 }

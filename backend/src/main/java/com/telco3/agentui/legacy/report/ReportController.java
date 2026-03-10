@@ -1,6 +1,6 @@
-package com.telco3.agentui.report;
+package com.telco3.agentui.legacy.report;
 
-import com.telco3.agentui.domain.InteractionRepository;
+import com.telco3.agentui.legacy.InteractionRepository;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.*;
 import java.util.*;
 
+@Deprecated(forRemoval = false, since = "1.3.0")
 @RestController @RequestMapping("/api/reports")
 public class ReportController {
   private final InteractionRepository repo;

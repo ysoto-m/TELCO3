@@ -4,25 +4,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-agentui}
       POSTGRES_USER: ${POSTGRES_USER:-agentui}
-      POSTGRES_PASSWORD: ${POSTGRES_PASS:-agentui}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentui}
     ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
-  backend:
-    build: ../backend
-    depends_on: [postgres]
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-agentui}
-      POSTGRES_USER: ${POSTGRES_USER:-agentui}
-      POSTGRES_PASS: ${POSTGRES_PASS:-agentui}
-      JWT_SECRET: ${JWT_SECRET:-12345678901234567890123456789012}
-      APP_CRYPTO_KEY: ${APP_CRYPTO_KEY:-1234567890123456}
-
-      # VICIDIAL (DESARROLLO CON VPN)
-      VICIDIAL_BASE_URL: ${VICIDIAL_BASE_URL:-http://host.docker.internal:9080}
-      VICIDIAL_API_USER: ${VICIDIAL_API_USER:-apiuser}
-      VICIDIAL_API_PASS: ${VICIDIAL_API_PASS:-rushpe15}
-      VICIDIAL_SOURCE: ${VICIDIAL_SOURCE:-react_crm}
-    ports: ["8080:8080"]
 volumes: { pgdata: {} }

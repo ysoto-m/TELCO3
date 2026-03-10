@@ -2,18 +2,18 @@ package com.telco3.agentui.manual2;
 
 import com.telco3.agentui.agent.VicidialCredentialService;
 import com.telco3.agentui.campaign.core.CampaignInteractionCoreService;
-import com.telco3.agentui.domain.AgentVicidialCredentialRepository;
 import com.telco3.agentui.domain.ContactoEntity;
-import com.telco3.agentui.domain.FormularioManual2Entity;
-import com.telco3.agentui.domain.FormularioManual2Repository;
 import com.telco3.agentui.domain.GestionLlamadaEntity;
 import com.telco3.agentui.domain.GestionLlamadaRepository;
 import com.telco3.agentui.domain.InteraccionEntity;
 import com.telco3.agentui.domain.InteraccionRepository;
+import com.telco3.agentui.manual2.domain.FormularioManual2Entity;
+import com.telco3.agentui.manual2.domain.FormularioManual2Repository;
 import com.telco3.agentui.vicidial.VicidialClient;
 import com.telco3.agentui.vicidial.VicidialRealtimeQueryService;
 import com.telco3.agentui.vicidial.VicidialService;
 import com.telco3.agentui.vicidial.VicidialServiceException;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -166,6 +166,7 @@ public class Manual2Service {
     String campana = coreService.firstNonBlank(request.campaignId(), "Manual2");
     String disposicion = coreService.firstNonBlank(request.disposicion());
     String tipificacion = coreService.firstNonBlank(request.tipificacion(), disposicion);
+    String comentarioGestion = coreService.firstNonBlank(request.comentario(), request.observaciones());
 
     if (!StringUtils.hasText(telefono)) {
       throw new VicidialServiceException(HttpStatus.BAD_REQUEST, "MANUAL2_PHONE_REQUIRED", "El telefono es obligatorio.", "Ingrese un telefono valido.", null);
@@ -181,7 +182,7 @@ public class Manual2Service {
     FormularioManual2Entity formulario = new FormularioManual2Entity();
     formulario.contactoId = contacto.id;
     formulario.telefono = telefono;
-    formulario.comentario = request.comentario();
+    formulario.comentario = comentarioGestion;
     formulario.campana = campana;
     formulario.creadoPor = agentUser;
     formulario.fechaRegistro = coreService.nowLima();
@@ -251,7 +252,7 @@ public class Manual2Service {
     gestion.tipificacion = tipificacion;
     gestion.disposicion = disposicion;
     gestion.subtipificacion = request.subtipificacion();
-    gestion.observaciones = coreService.firstNonBlank(request.observaciones(), request.comentario());
+    gestion.observaciones = comentarioGestion;
     gestion.modoLlamada = request.modoLlamada();
     gestion.leadId = request.leadId();
     gestion.callId = request.callId();

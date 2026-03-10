@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './app/App';
 
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+document.title = 'APU CONTACT';
 
 const theme = createTheme({
   palette: {

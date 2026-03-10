@@ -19,6 +19,9 @@ public class GestionLlamadaEntity {
   @Column(name = "formulario_manual2_id")
   public Long formularioManual2Id;
 
+  @Column(name = "formulario_validacion_claro_peru_id")
+  public Long formularioValidacionClaroPeruId;
+
   @Column(name = "contacto_id")
   public Long contactoId;
 

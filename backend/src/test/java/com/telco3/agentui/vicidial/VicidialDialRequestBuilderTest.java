@@ -1,6 +1,6 @@
 package com.telco3.agentui.vicidial;
 
-import com.telco3.agentui.domain.Entities;
+import com.telco3.agentui.vicidial.domain.AgentVicidialCredentialEntity;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -26,7 +26,7 @@ class VicidialDialRequestBuilderTest {
         .thenReturn(List.of(new VicidialCampaignParser.CampaignOption("MANUAL2", "MANUAL2")));
 
     VicidialDialRequestBuilder builder = new VicidialDialRequestBuilder(client, parser, properties);
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.serverIp = "172.17.248.220";
     session.sessionName = "1772926042_100114082742";
     session.connectedPhoneLogin = "1001";
@@ -56,7 +56,7 @@ class VicidialDialRequestBuilderTest {
         .thenReturn(List.of(new VicidialCampaignParser.CampaignOption("MANUAL2", "MANUAL2")));
 
     VicidialDialRequestBuilder builder = new VicidialDialRequestBuilder(client, parser, properties);
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.serverIp = "172.17.248.220";
     session.sessionName = "1772926042_100114082742";
     session.connectedPhoneLogin = "1001";
@@ -85,7 +85,7 @@ class VicidialDialRequestBuilderTest {
         .thenReturn(List.of(new VicidialCampaignParser.CampaignOption("MANUAL2", "MANUAL2")));
 
     VicidialDialRequestBuilder builder = new VicidialDialRequestBuilder(client, parser, properties);
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.serverIp = "172.17.248.220";
     session.sessionName = "1772926042_100114082742";
     session.connectedPhoneLogin = "1001";
@@ -123,7 +123,7 @@ class VicidialDialRequestBuilderTest {
         .thenReturn(List.of(new VicidialCampaignParser.CampaignOption("MANUAL2", "MANUAL2")));
 
     VicidialDialRequestBuilder builder = new VicidialDialRequestBuilder(client, parser, properties);
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.serverIp = "172.17.248.220";
     session.sessionName = "1772926042_100114082742";
     session.connectedPhoneLogin = "1001";
@@ -158,7 +158,7 @@ class VicidialDialRequestBuilderTest {
         .thenReturn(List.of(new VicidialCampaignParser.CampaignOption("MANUAL2", "MANUAL2")));
 
     VicidialDialRequestBuilder builder = new VicidialDialRequestBuilder(client, parser, properties);
-    Entities.AgentVicidialCredentialEntity session = new Entities.AgentVicidialCredentialEntity();
+    AgentVicidialCredentialEntity session = new AgentVicidialCredentialEntity();
     session.serverIp = "172.17.248.220";
     session.sessionName = "1772926042_100114082742";
     session.connectedPhoneLogin = "1001";
@@ -179,3 +179,4 @@ class VicidialDialRequestBuilderTest {
     assertEquals("1", payload.get("phone_code"));
   }
 }
+
