@@ -76,6 +76,31 @@ Auditoria tecnica del paquete Vicidial:
 
 - `docs/vicidial-integration-audit.md`
 
+## Flujo minimo para llamar
+
+Para poder marcar desde CRM el agente debe completar este orden:
+
+1. `POST /api/agent/vicidial/phone/connect`
+2. `POST /api/agent/vicidial/campaign/connect`
+3. `POST /api/agent/vicidial/dial/manual` o `POST /api/agent/vicidial/dial/next`
+
+Reglas operativas importantes:
+
+- `phone/connect` solo conecta el anexo. No habilita marcacion por si solo.
+- `campaign/connect` debe ejecutarse antes del dial porque ahi se obtiene y persiste la sesion runtime de Vicidial (`session_name`, `server_ip`, `conf_exten`, `agent_log_id`).
+- `dial/manual` ejecuta preflight AGC y luego `manDiaLnextCaLL`. El backend no debe bloquear la marcacion manual solo porque runtime reporte `PAUSED` antes del request.
+- La llamada solo se considera confirmada cuando Vicidial devuelve evidencia runtime de `INCALL` (`callId`, `leadId`, `uniqueId`, `channel`, `agentStatus`).
+- Despues de un manual dial exitoso puede existir una ventana corta donde `GET /api/agent/context` o el primer `GET /api/agent/active-lead` todavia reflejen `PAUSED`. El estado correcto termina de converger en el siguiente poll de runtime.
+
+Secuencia minima real de manual dial:
+
+1. `update_settings`
+2. `CalLBacKCounT`
+3. `manDiaLnextCaLL`
+4. follow-up runtime (`conf_exten_check`, `lookCall`, `MonitorConf`, `logCall`)
+
+Si este orden no se respeta, Vicidial puede responder HTTP 200 al request pero no originar la llamada en Asterisk.
+
 ## Ejecucion local
 
 Backend:

@@ -58,8 +58,8 @@ Endpoints CRM:
 
 Secuencia AGC esperada:
 
-1. `POST /agc/vdc_db_query.php ACTION=CalLBacKCounT`
-2. `POST /agc/vdc_db_query.php ACTION=update_settings`
+1. `POST /agc/vdc_db_query.php ACTION=update_settings`
+2. `POST /agc/vdc_db_query.php ACTION=CalLBacKCounT`
 3. `POST /agc/vdc_db_query.php ACTION=manDiaLnextCaLL`
 4. `POST /agc/vdc_script_display.php`
 5. `POST /agc/conf_exten_check.php` (poll de estado)
@@ -71,6 +71,12 @@ Confirmacion de llamada:
 
 - no se considera confirmada solo por `manDiaLnextCaLL`.
 - debe existir evidencia runtime (estado, callId/leadId, uniqueid/channel, consistencia de lookCall).
+
+Regla critica de backend:
+
+- el backend no debe abortar `dial/manual` antes de `manDiaLnextCaLL` solo porque una lectura runtime previa reporte `PAUSED`.
+- la validacion correcta es dejar que Vicidial procese el dial y confirmar despues si el agente/llamada convergen a `INCALL`.
+- un `PAUSED` inmediatamente posterior al dial puede ser transitorio durante uno o dos polls antes de que runtime refleje la llamada activa.
 
 ## 2.1 Payload base requerido para acciones runtime
 
@@ -153,4 +159,3 @@ Campos clave de `userLOGout`:
 - No marcar exito prematuro sin evidencia runtime de llamada.
 - Mantener compatibilidad de aliases API de CRM, pero desarrollar contra endpoints oficiales.
 - No mezclar este flujo con scraping HTML del frontend de Vicidial.
-
